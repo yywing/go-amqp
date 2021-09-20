@@ -76,7 +76,7 @@ func (s *Session) Close(ctx context.Context) error {
 // txFrame sends a frame to the connWriter.
 // it returns an error if the connection has been closed.
 func (s *Session) txFrame(p frames.FrameBody, done chan encoding.DeliveryState) error {
-	return s.conn.wantWriteFrame(frames.Frame{
+	return s.conn.SendFrame(frames.Frame{
 		Type:    frameTypeAMQP,
 		Channel: s.channel,
 		Body:    p,
@@ -128,9 +128,9 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 	defer func() {
 		// clean up session record in conn.mux()
 		select {
-		case s.conn.delSession <- s:
-		case <-s.conn.done:
-			s.err = s.conn.getErr()
+		case s.conn.DelSession <- s:
+		case <-s.conn.Done:
+			s.err = s.conn.Err()
 		}
 		if s.err == nil {
 			s.err = ErrSessionClosed
@@ -169,8 +169,8 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 
 		select {
 		// conn has completed, exit
-		case <-s.conn.done:
-			s.err = s.conn.getErr()
+		case <-s.conn.Done:
+			s.err = s.conn.Err()
 			return
 
 		// session is being closed by user
@@ -186,8 +186,8 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 					if ok {
 						break EndLoop
 					}
-				case <-s.conn.done:
-					s.err = s.conn.getErr()
+				case <-s.conn.Done:
+					s.err = s.conn.Err()
 					return
 				}
 			}
@@ -196,30 +196,30 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 		// handle allocation request
 		case l := <-s.allocateHandle:
 			// Check if link name already exists, if so then an error should be returned
-			if linksByKey[l.key] != nil {
-				l.err = fmt.Errorf("link with name '%v' already exists", l.key.name)
-				l.rx <- nil
+			if linksByKey[l.Key] != nil {
+				l.err = fmt.Errorf("link with name '%v' already exists", l.Key.name)
+				l.RX <- nil
 				continue
 			}
 
 			next, ok := handles.Next()
 			if !ok {
 				l.err = fmt.Errorf("reached session handle max (%d)", s.handleMax)
-				l.rx <- nil
+				l.RX <- nil
 				continue
 			}
 
-			l.handle = next       // allocate handle to the link
-			linksByKey[l.key] = l // add to mapping
-			l.rx <- nil           // send nil on channel to indicate allocation complete
+			l.Handle = next       // allocate handle to the link
+			linksByKey[l.Key] = l // add to mapping
+			l.RX <- nil           // send nil on channel to indicate allocation complete
 
 		// handle deallocation request
 		case l := <-s.deallocateHandle:
-			delete(links, l.remoteHandle)
-			delete(deliveryIDByHandle, l.handle)
-			delete(linksByKey, l.key)
-			handles.Remove(l.handle)
-			close(l.rx) // close channel to indicate deallocation
+			delete(links, l.RemoteHandle)
+			delete(deliveryIDByHandle, l.Handle)
+			delete(linksByKey, l.Key)
+			handles.Remove(l.Handle)
+			close(l.RX) // close channel to indicate deallocation
 
 		// incoming frame for link
 		case fr := <-s.rx:
@@ -335,8 +335,8 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 					break
 				}
 
-				link.remoteHandle = body.Handle
-				links[link.remoteHandle] = link
+				link.RemoteHandle = body.Handle
+				links[link.RemoteHandle] = link
 
 				s.muxFrameToLink(link, fr.Body)
 
@@ -357,12 +357,12 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 				}
 
 				select {
-				case <-s.conn.done:
-				case link.rx <- fr.Body:
+				case <-s.conn.Done:
+				case link.RX <- fr.Body:
 				}
 
 				// if this message is received unsettled and link rcv-settle-mode == second, add to handlesByRemoteDeliveryID
-				if !body.Settled && body.DeliveryID != nil && link.receiverSettleMode != nil && *link.receiverSettleMode == ModeSecond {
+				if !body.Settled && body.DeliveryID != nil && link.ReceiverSettleMode != nil && *link.ReceiverSettleMode == ModeSecond {
 					debug(1, "TX(Session): adding handle to handlesByRemoteDeliveryID. linkCredit: %d", link.linkCredit)
 					handlesByRemoteDeliveryID[*body.DeliveryID] = body.Handle
 				}
@@ -461,8 +461,8 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 
 func (s *Session) muxFrameToLink(l *link, fr frames.FrameBody) {
 	select {
-	case l.rx <- fr:
-	case <-l.detached:
-	case <-s.conn.done:
+	case l.RX <- fr:
+	case <-l.Detached:
+	case <-s.conn.Done:
 	}
 }
