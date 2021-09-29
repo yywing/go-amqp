@@ -57,12 +57,14 @@ func (mc *manualCreditor) Drain(ctx context.Context) error {
 	}
 
 	mc.drained = make(chan struct{})
+	// use a local copy to avoid racing with EndDrain()
+	drained := mc.drained
 
 	mc.mu.Unlock()
 
 	// send drain, wait for responding flow frame
 	select {
-	case <-mc.drained:
+	case <-drained:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
