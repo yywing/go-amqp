@@ -532,9 +532,7 @@ func (l *link) muxReceive(fr frames.PerformTransfer) error {
 	// discard message if it's been aborted
 	if fr.Aborted {
 		l.buf.Reset()
-		l.msg = Message{
-			doneSignal: make(chan struct{}),
-		}
+		l.msg = Message{}
 		l.more = false
 		return nil
 	}
@@ -713,6 +711,7 @@ func (l *link) muxHandleFrame(fr frames.FrameBody) error {
 					dispositionError = state.Error
 				}
 			}
+			// removal from the in-flight map will also remove the message from the unsettled map
 			l.receiver.inFlight.remove(fr.First, fr.Last, dispositionError)
 		}
 
