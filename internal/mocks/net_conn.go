@@ -30,11 +30,27 @@ func NewNetConn(resp func(frames.FrameBody) ([]byte, error)) *NetConn {
 
 // NetConn is a mock network connection that satisfies the net.Conn interface.
 type NetConn struct {
+	// OnClose is called from Close() before it returns.
+	// The value returned from OnClose is returned from Close().
+	OnClose func() error
+
 	resp      func(frames.FrameBody) ([]byte, error)
 	readDL    *time.Timer
 	readData  chan []byte
 	readClose chan struct{}
 	closed    bool
+}
+
+// SendFrame sends the encoded frame to the client.
+// Use this to send a frame at an arbitrary time.
+func (n *NetConn) SendFrame(f []byte) {
+	n.readData <- f
+}
+
+// SendKeepAlive sends a keep-alive frame to the client.
+func (n *NetConn) SendKeepAlive() {
+	// empty frame
+	n.readData <- []uint8{0, 0, 0, 8, 2, 0, 0, 0}
 }
 
 ///////////////////////////////////////////////////////
@@ -99,6 +115,9 @@ func (n *NetConn) Close() error {
 	}
 	n.closed = true
 	close(n.readClose)
+	if n.OnClose != nil {
+		return n.OnClose()
+	}
 	return nil
 }
 
@@ -154,13 +173,13 @@ func ProtoHeader(id ProtoID) ([]byte, error) {
 // PerformOpen appends a PerformOpen frame with the specified container ID.
 // This frame, and ProtoHeader, are needed when calling amqp.New() to create a client.
 func PerformOpen(containerID string) ([]byte, error) {
-	return encodeFrame(frameAMQP, &frames.PerformOpen{ContainerID: "test"})
+	return EncodeFrame(FrameAMQP, &frames.PerformOpen{ContainerID: containerID})
 }
 
 // PerformBegin appends a PerformBegin frame with the specified remote channel ID.
 // This frame is needed when making a call to Client.NewSession().
 func PerformBegin(remoteChannel uint16) ([]byte, error) {
-	return encodeFrame(frameAMQP, &frames.PerformBegin{
+	return EncodeFrame(FrameAMQP, &frames.PerformBegin{
 		RemoteChannel:  &remoteChannel,
 		NextOutgoingID: 1,
 		IncomingWindow: 5000,
@@ -172,7 +191,7 @@ func PerformBegin(remoteChannel uint16) ([]byte, error) {
 // ReceiverAttach appends a PerformAttach frame with the specified values.
 // This frame is needed when making a call to Session.NewReceiver().
 func ReceiverAttach(linkName string, linkHandle uint32, mode encoding.ReceiverSettleMode) ([]byte, error) {
-	return encodeFrame(frameAMQP, &frames.PerformAttach{
+	return EncodeFrame(FrameAMQP, &frames.PerformAttach{
 		Name:   linkName,
 		Handle: linkHandle,
 		Role:   encoding.RoleSender,
@@ -196,7 +215,7 @@ func PerformTransfer(linkHandle, deliveryID uint32, payload []byte) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	return encodeFrame(frameAMQP, &frames.PerformTransfer{
+	return EncodeFrame(FrameAMQP, &frames.PerformTransfer{
 		Handle:        linkHandle,
 		DeliveryID:    &deliveryID,
 		DeliveryTag:   []byte("tag"),
@@ -208,12 +227,17 @@ func PerformTransfer(linkHandle, deliveryID uint32, payload []byte) ([]byte, err
 // PerformDisposition appends a PerformDisposition frame with the specified values.
 // The deliveryID MUST match the deliveryID value specified in PerformTransfer.
 func PerformDisposition(deliveryID uint32, state encoding.DeliveryState) ([]byte, error) {
-	return encodeFrame(frameAMQP, &frames.PerformDisposition{
+	return EncodeFrame(FrameAMQP, &frames.PerformDisposition{
 		Role:    encoding.RoleSender,
 		First:   deliveryID,
 		Settled: true,
 		State:   state,
 	})
+}
+
+// PerformClose encodes a PerformClose frame with an optional error.
+func PerformClose(e *encoding.Error) ([]byte, error) {
+	return EncodeFrame(FrameAMQP, &frames.PerformClose{Error: e})
 }
 
 // AMQPProto is the frame type passed to FrameCallback() for the initial protocal handshake.
@@ -237,13 +261,14 @@ func (f frameHeader) Marshal(wr *buffer.Buffer) error {
 }
 
 // FrameType indicates the type of frame (copied from sasl.go)
-type frameType uint8
+type FrameType uint8
 
 const (
-	frameAMQP frameType = 0x0
+	FrameAMQP FrameType = 0x0
 )
 
-func encodeFrame(t frameType, f frames.FrameBody) ([]byte, error) {
+// EncodeFrame encodes the specified frame to be sent over the wire.
+func EncodeFrame(t FrameType, f frames.FrameBody) ([]byte, error) {
 	bodyBuf := buffer.New([]byte{})
 	if err := encoding.Marshal(bodyBuf, f); err != nil {
 		return nil, err
