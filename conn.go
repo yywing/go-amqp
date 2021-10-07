@@ -418,6 +418,7 @@ func (c *conn) mux() {
 		channels = bitmap.New(uint32(c.channelMax))
 
 		// create the next session to allocate
+		// note that channel always start at 0, and 0 is special and can't be deleted
 		nextChannel, _ = channels.Next()
 		nextSession    = newSessionResp{session: newSession(c, uint16(nextChannel))}
 
@@ -461,10 +462,14 @@ func (c *conn) mux() {
 			// RemoteChannel should be used when frame is Begin
 			case *frames.PerformBegin:
 				if body.RemoteChannel == nil {
+					// since we only support remotely-initiated sessions, this is an error
+					// TODO: it would be ideal to not have this kill the connection
+					c.err = fmt.Errorf("%T: nil RemoteChannel", fr.Body)
 					break
 				}
 				session, ok = sessionsByChannel[*body.RemoteChannel]
 				if !ok {
+					c.err = fmt.Errorf("unexpected remote channel number %d, expected %d", *body.RemoteChannel, nextChannel)
 					break
 				}
 
@@ -473,10 +478,12 @@ func (c *conn) mux() {
 
 			default:
 				session, ok = sessionsByRemoteChannel[fr.Channel]
+				if !ok {
+					c.err = fmt.Errorf("%T: didn't find channel %d in sessionsByRemoteChannel", fr.Body, fr.Channel)
+				}
 			}
 
 			if !ok {
-				c.err = fmt.Errorf("unexpected frame: %#v", fr.Body)
 				continue
 			}
 
@@ -845,7 +852,7 @@ func (c *conn) readProtoHeader() (protoHeader, error) {
 	case err := <-c.connErr:
 		return p, err
 	case fr := <-c.rxFrame:
-		return p, fmt.Errorf("unexpected frame %#v", fr)
+		return p, fmt.Errorf("readProtoHeader: unexpected frame %#v", fr)
 	case <-deadline:
 		return p, ErrTimeout
 	}
@@ -917,7 +924,7 @@ func (c *conn) openAMQP() stateFunc {
 	}
 	o, ok := fr.Body.(*frames.PerformOpen)
 	if !ok {
-		c.err = fmt.Errorf("unexpected frame type %T", fr.Body)
+		c.err = fmt.Errorf("openAMQP: unexpected frame type %T", fr.Body)
 		return nil
 	}
 	debug(1, "RX: %s", o)
@@ -949,7 +956,7 @@ func (c *conn) negotiateSASL() stateFunc {
 	}
 	sm, ok := fr.Body.(*frames.SASLMechanisms)
 	if !ok {
-		c.err = fmt.Errorf("unexpected frame type %T", fr.Body)
+		c.err = fmt.Errorf("negotiateSASL: unexpected frame type %T", fr.Body)
 		return nil
 	}
 	debug(1, "RX: %s", sm)
@@ -981,7 +988,7 @@ func (c *conn) saslOutcome() stateFunc {
 	}
 	so, ok := fr.Body.(*frames.SASLOutcome)
 	if !ok {
-		c.err = fmt.Errorf("unexpected frame type %T", fr.Body)
+		c.err = fmt.Errorf("saslOutcome: unexpected frame type %T", fr.Body)
 		return nil
 	}
 	debug(1, "RX: %s", so)
