@@ -476,7 +476,19 @@ func (c *conn) mux() {
 				session.remoteChannel = fr.Channel
 				sessionsByRemoteChannel[fr.Channel] = session
 
+			case *frames.PerformEnd:
+				session, ok = sessionsByRemoteChannel[fr.Channel]
+				if !ok {
+					c.err = fmt.Errorf("%T: didn't find channel %d in sessionsByRemoteChannel", fr.Body, fr.Channel)
+					break
+				}
+				// we MUST remove the remote channel from our map as soon as we receive
+				// the ack (i.e. before passing it on to the session mux) on the session
+				// ending since the numbers are recycled.
+				delete(sessionsByRemoteChannel, fr.Channel)
+
 			default:
+				// pass on performative to the correct session
 				session, ok = sessionsByRemoteChannel[fr.Channel]
 				if !ok {
 					c.err = fmt.Errorf("%T: didn't find channel %d in sessionsByRemoteChannel", fr.Body, fr.Channel)
@@ -522,7 +534,6 @@ func (c *conn) mux() {
 		// session deletion
 		case s := <-c.DelSession:
 			delete(sessionsByChannel, s.channel)
-			delete(sessionsByRemoteChannel, s.remoteChannel)
 			channels.Remove(uint32(s.channel))
 
 		// connection is complete
@@ -717,7 +728,7 @@ func (c *conn) connWriter() {
 		case <-c.Done:
 			// send close
 			cls := &frames.PerformClose{}
-			debug(1, "TX: %s", cls)
+			debug(1, "TX (connWriter): %s", cls)
 			_ = c.writeFrame(frames.Frame{
 				Type: frameTypeAMQP,
 				Body: cls,
@@ -906,7 +917,7 @@ func (c *conn) openAMQP() stateFunc {
 		IdleTimeout:  c.idleTimeout / 2, // per spec, advertise half our idle timeout
 		Properties:   c.properties,
 	}
-	debug(1, "TX: %s", open)
+	debug(1, "TX (openAMQP): %s", open)
 	c.err = c.writeFrame(frames.Frame{
 		Type:    frameTypeAMQP,
 		Body:    open,
@@ -927,7 +938,7 @@ func (c *conn) openAMQP() stateFunc {
 		c.err = fmt.Errorf("openAMQP: unexpected frame type %T", fr.Body)
 		return nil
 	}
-	debug(1, "RX: %s", o)
+	debug(1, "RX (openAMQP): %s", o)
 
 	// update peer settings
 	if o.MaxFrameSize > 0 {
@@ -959,7 +970,7 @@ func (c *conn) negotiateSASL() stateFunc {
 		c.err = fmt.Errorf("negotiateSASL: unexpected frame type %T", fr.Body)
 		return nil
 	}
-	debug(1, "RX: %s", sm)
+	debug(1, "RX (negotiateSASL): %s", sm)
 
 	// return first match in c.saslHandlers based on order received
 	for _, mech := range sm.Mechanisms {
@@ -991,7 +1002,7 @@ func (c *conn) saslOutcome() stateFunc {
 		c.err = fmt.Errorf("saslOutcome: unexpected frame type %T", fr.Body)
 		return nil
 	}
-	debug(1, "RX: %s", so)
+	debug(1, "RX (saslOutcome): %s", so)
 
 	// check if auth succeeded
 	if so.Code != encoding.CodeSASLOK {

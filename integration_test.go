@@ -441,7 +441,7 @@ func TestIntegrationSessionHandleMax(t *testing.T) {
 		{
 			maxLinks: 4,
 			links:    5,
-			error:    regexp.MustCompile(`handle max \(3\)`),
+			error:    regexp.MustCompile(`handle max \(4\)`),
 		},
 		{
 			maxLinks: 5,
@@ -466,7 +466,7 @@ func TestIntegrationSessionHandleMax(t *testing.T) {
 			maxLinks: 62,
 			links:    64,
 			close:    1,
-			error:    regexp.MustCompile(`handle max \(61\)`),
+			error:    regexp.MustCompile(`handle max \(62\)`),
 		},
 	}
 
@@ -718,6 +718,77 @@ func TestIntegrationClose(t *testing.T) {
 
 		checkLeaks()
 	})
+}
+
+func TestMultipleSessionsOpenClose(t *testing.T) {
+	if localBrokerAddr == "" {
+		t.Skip()
+	}
+	// TODO: connReader and connWriter goroutines will leak
+	//checkLeaks := leaktest.Check(t)
+
+	// Create client
+	client, err := amqp.Dial(localBrokerAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	sessions := [10]*amqp.Session{}
+	for i := 0; i < 10; i++ {
+		for j := 0; j < 10; j++ {
+			session, err := client.NewSession()
+			if err != nil {
+				t.Fatalf("failed to create session: %v", err)
+				return
+			}
+			sessions[j] = session
+		}
+		for _, session := range sessions {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = session.Close(ctx)
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	//checkLeaks()
+}
+
+func TestConcurrentSessionsOpenClose(t *testing.T) {
+	if localBrokerAddr == "" {
+		t.Skip()
+	}
+	// TODO: connReader and connWriter goroutines will leak
+	//checkLeaks := leaktest.Check(t)
+
+	// Create client
+	client, err := amqp.Dial(localBrokerAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	wg := sync.WaitGroup{}
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			session, err := client.NewSession()
+			if err != nil {
+				t.Errorf("failed to create session: %v", err)
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			err = session.Close(ctx)
+			cancel()
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	//checkLeaks()
 }
 
 func repeatStrings(count int, strs ...string) []string {
