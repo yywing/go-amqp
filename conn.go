@@ -26,16 +26,6 @@ const (
 	DefaultMaxSessions  = 65536
 )
 
-// Errors
-var (
-	ErrTimeout = errors.New("amqp: timeout waiting for response")
-
-	// ErrConnClosed is propagated to Session and Senders/Receivers
-	// when Client.Close() is called or the server closes the connection
-	// without specifying an error.
-	ErrConnClosed = errors.New("amqp: connection closed")
-)
-
 // ConnOption is a function for configuring an AMQP connection.
 type ConnOption func(*conn) error
 
@@ -509,6 +499,8 @@ func (c *conn) mux() {
 				continue
 			}
 
+			// TODO: this can deadlock with session mux unwind
+			// https://github.com/Azure/go-amqp/issues/87
 			select {
 			case session.rx <- fr:
 			case <-c.closeMux:
