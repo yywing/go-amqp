@@ -319,24 +319,13 @@ func TestStart(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	responder := func(req frames.FrameBody) ([]byte, error) {
-		switch req.(type) {
-		case *mocks.AMQPProto:
-			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
-		case *frames.PerformOpen:
-			return mocks.PerformOpen("container")
-		default:
-			return nil, fmt.Errorf("unhandled frame %T", req)
-		}
-	}
-
-	netConn := mocks.NewNetConn(responder)
+	netConn := mocks.NewNetConn(standardFrameHandlerNoUnhandled)
 	conn, err := newConn(netConn)
 	require.NoError(t, err)
 	require.NoError(t, conn.Start())
 	require.NoError(t, conn.Close())
 	// with Close error
-	netConn = mocks.NewNetConn(responder)
+	netConn = mocks.NewNetConn(standardFrameHandlerNoUnhandled)
 	conn, err = newConn(netConn)
 	require.NoError(t, err)
 	require.NoError(t, conn.Start())
@@ -349,18 +338,7 @@ func TestClose(t *testing.T) {
 }
 
 func TestServerSideClose(t *testing.T) {
-	responder := func(req frames.FrameBody) ([]byte, error) {
-		switch req.(type) {
-		case *mocks.AMQPProto:
-			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
-		case *frames.PerformOpen:
-			return mocks.PerformOpen("container")
-		default:
-			return nil, fmt.Errorf("unhandled frame %T", req)
-		}
-	}
-
-	netConn := mocks.NewNetConn(responder)
+	netConn := mocks.NewNetConn(standardFrameHandlerNoUnhandled)
 	conn, err := newConn(netConn)
 	require.NoError(t, err)
 	require.NoError(t, conn.Start())
@@ -370,7 +348,7 @@ func TestServerSideClose(t *testing.T) {
 	err = conn.Close()
 	require.NoError(t, err)
 	// with error
-	netConn = mocks.NewNetConn(responder)
+	netConn = mocks.NewNetConn(standardFrameHandlerNoUnhandled)
 	conn, err = newConn(netConn)
 	require.NoError(t, err)
 	require.NoError(t, conn.Start())
@@ -422,18 +400,7 @@ func TestKeepAlives(t *testing.T) {
 }
 
 func TestConnReaderError(t *testing.T) {
-	responder := func(req frames.FrameBody) ([]byte, error) {
-		switch req.(type) {
-		case *mocks.AMQPProto:
-			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
-		case *frames.PerformOpen:
-			return mocks.PerformOpen("container")
-		default:
-			return nil, fmt.Errorf("unhandled frame %T", req)
-		}
-	}
-
-	netConn := mocks.NewNetConn(responder)
+	netConn := mocks.NewNetConn(standardFrameHandlerNoUnhandled)
 	conn, err := newConn(netConn)
 	require.NoError(t, err)
 	require.NoError(t, conn.Start())
@@ -445,18 +412,7 @@ func TestConnReaderError(t *testing.T) {
 }
 
 func TestConnWriterError(t *testing.T) {
-	responder := func(req frames.FrameBody) ([]byte, error) {
-		switch req.(type) {
-		case *mocks.AMQPProto:
-			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
-		case *frames.PerformOpen:
-			return mocks.PerformOpen("container")
-		default:
-			return nil, fmt.Errorf("unhandled frame %T", req)
-		}
-	}
-
-	netConn := mocks.NewNetConn(responder)
+	netConn := mocks.NewNetConn(standardFrameHandlerNoUnhandled)
 	conn, err := newConn(netConn)
 	require.NoError(t, err)
 	require.NoError(t, conn.Start())
