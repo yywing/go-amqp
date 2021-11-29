@@ -638,11 +638,20 @@ func (l *link) IssueCredit(credit uint32) error {
 	return nil
 }
 
+func (l *link) detachOnRejectDisp() bool {
+	// only detach on rejection when no RSM was requested or in ModeFirst.
+	// if the receiver is in ModeSecond, it will send an explicit rejection disposition
+	// that we'll have to ack. so in that case, we don't treat it as a link error.
+	if l.detachOnDispositionError && (l.receiver == nil && (l.ReceiverSettleMode == nil || *l.ReceiverSettleMode == ModeFirst)) {
+		return true
+	}
+	return false
+}
+
 // muxHandleFrame processes fr based on type.
 func (l *link) muxHandleFrame(fr frames.FrameBody) error {
 	var (
-		isSender               = l.receiver == nil
-		errOnRejectDisposition = l.detachOnDispositionError && (isSender && (l.ReceiverSettleMode == nil || *l.ReceiverSettleMode == ModeFirst))
+		isSender = l.receiver == nil
 	)
 
 	switch fr := fr.(type) {
@@ -733,8 +742,8 @@ func (l *link) muxHandleFrame(fr frames.FrameBody) error {
 		// If sending async and a message is rejected, cause a link error.
 		//
 		// This isn't ideal, but there isn't a clear better way to handle it.
-		if fr, ok := fr.State.(*encoding.StateRejected); ok && errOnRejectDisposition {
-			return fr.Error
+		if fr, ok := fr.State.(*encoding.StateRejected); ok && l.detachOnRejectDisp() {
+			return &DetachError{fr.Error}
 		}
 
 		if fr.Settled {
