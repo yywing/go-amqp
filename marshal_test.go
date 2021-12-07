@@ -481,17 +481,58 @@ var (
 			Properties: &MessageProperties{
 				MessageID:          "yo",
 				UserID:             []byte("baz"),
-				To:                 "me",
-				Subject:            "sup?",
-				ReplyTo:            "you",
+				To:                 stringPtr("me"),
+				Subject:            stringPtr("sup?"),
+				ReplyTo:            stringPtr("you"),
 				CorrelationID:      uint64(34513),
-				ContentType:        "text/plain",
-				ContentEncoding:    "UTF-8",
-				AbsoluteExpiryTime: time.Date(2018, 01, 13, 14, 24, 07, 0, time.UTC),
-				CreationTime:       time.Date(2018, 01, 13, 14, 14, 07, 0, time.UTC),
-				GroupID:            "fooGroup",
-				GroupSequence:      89324,
-				ReplyToGroupID:     "barGroup",
+				ContentType:        stringPtr("text/plain"),
+				ContentEncoding:    stringPtr("UTF-8"),
+				AbsoluteExpiryTime: timePtr(time.Date(2018, 01, 13, 14, 24, 07, 0, time.UTC)),
+				CreationTime:       timePtr(time.Date(2018, 01, 13, 14, 14, 07, 0, time.UTC)),
+				GroupID:            stringPtr("fooGroup"),
+				GroupSequence:      uint32Ptr(89324),
+				ReplyToGroupID:     stringPtr("barGroup"),
+			},
+			ApplicationProperties: map[string]interface{}{
+				"baz": "foo",
+			},
+			Data: [][]byte{
+				[]byte("A nice little data payload."),
+				[]byte("More payload."),
+			},
+			Value: uint8(42),
+			Footer: encoding.Annotations{
+				"hash": []uint8{0, 1, 2, 34, 5, 6, 7, 8, 9, 0},
+			},
+		},
+		&Message{
+			Header: &MessageHeader{
+				Durable:       true,
+				Priority:      234,
+				TTL:           10 * time.Second,
+				FirstAcquirer: true,
+				DeliveryCount: 32,
+			},
+			DeliveryAnnotations: encoding.Annotations{
+				int64(42): "answer",
+			},
+			Annotations: encoding.Annotations{
+				int64(42): "answer",
+			},
+			Properties: &MessageProperties{
+				MessageID:          nil,
+				UserID:             nil,
+				To:                 nil,
+				Subject:            nil,
+				ReplyTo:            nil,
+				CorrelationID:      nil,
+				ContentType:        nil,
+				ContentEncoding:    nil,
+				AbsoluteExpiryTime: nil,
+				CreationTime:       nil,
+				GroupID:            nil,
+				GroupSequence:      nil,
+				ReplyToGroupID:     nil,
 			},
 			ApplicationProperties: map[string]interface{}{
 				"baz": "foo",
@@ -515,17 +556,17 @@ var (
 		&MessageProperties{
 			MessageID:          "yo",
 			UserID:             []byte("baz"),
-			To:                 "me",
-			Subject:            "sup?",
-			ReplyTo:            "you",
+			To:                 stringPtr("me"),
+			Subject:            stringPtr("sup?"),
+			ReplyTo:            stringPtr("you"),
 			CorrelationID:      uint64(34513),
-			ContentType:        "text/plain",
-			ContentEncoding:    "UTF-8",
-			AbsoluteExpiryTime: time.Date(2018, 01, 13, 14, 24, 07, 0, time.UTC),
-			CreationTime:       time.Date(2018, 01, 13, 14, 14, 07, 0, time.UTC),
-			GroupID:            "fooGroup",
-			GroupSequence:      89324,
-			ReplyToGroupID:     "barGroup",
+			ContentType:        stringPtr("text/plain"),
+			ContentEncoding:    stringPtr("UTF-8"),
+			AbsoluteExpiryTime: timePtr(time.Date(2018, 01, 13, 14, 24, 07, 0, time.UTC)),
+			CreationTime:       timePtr(time.Date(2018, 01, 13, 14, 14, 07, 0, time.UTC)),
+			GroupID:            stringPtr("fooGroup"),
+			GroupSequence:      uint32Ptr(89324),
+			ReplyToGroupID:     stringPtr("barGroup"),
 		},
 		&encoding.StateReceived{
 			SectionNumber: 234,
@@ -650,4 +691,11 @@ func rcvSettle(m ReceiverSettleMode) *ReceiverSettleMode {
 
 func uint32Ptr(u uint32) *uint32 {
 	return &u
+}
+func stringPtr(s string) *string {
+	return &s
+}
+
+func timePtr(t time.Time) *time.Time {
+	return &t
 }
