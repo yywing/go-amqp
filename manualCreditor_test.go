@@ -2,10 +2,12 @@ package amqp
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/Azure/go-amqp/internal/encoding"
 	"github.com/stretchr/testify/require"
 )
 
@@ -111,4 +113,29 @@ func TestManualCreditorDrainRespectsContext(t *testing.T) {
 	cancel()
 
 	require.Error(t, mc.Drain(ctx, newTestLink(t)), context.Canceled.Error())
+}
+
+func TestManualCreditorDrainReturnsProperError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*2)
+	defer cancel()
+
+	errs := []*Error{
+		&encoding.Error{
+			Condition: ErrorDecodeError,
+		},
+		nil,
+	}
+
+	for i, err := range errs {
+		t.Run(fmt.Sprintf("Error[%d]", i), func(t *testing.T) {
+			mc := manualCreditor{}
+			link := newTestLink(t)
+
+			link.detachError = err
+			close(link.Detached)
+
+			detachErr := mc.Drain(ctx, link)
+			require.Equal(t, detachErr, &DetachError{RemoteError: err})
+		})
+	}
 }

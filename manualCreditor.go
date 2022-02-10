@@ -80,7 +80,7 @@ func (mc *manualCreditor) Drain(ctx context.Context, l *link) error {
 	case <-drained:
 		return nil
 	case <-l.Detached:
-		return l.detachError
+		return &DetachError{RemoteError: l.detachError}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
