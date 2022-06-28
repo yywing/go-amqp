@@ -23,19 +23,25 @@ func TestReceiverInvalidOptions(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(3))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ReceiverSettleMode(3).Ptr(),
+	})
 	cancel()
 	require.Error(t, err)
 	require.Nil(t, r)
 
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err = session.NewReceiver(ctx, LinkTargetDurability(3))
+	r, err = session.NewReceiver(ctx, "source", &ReceiverOptions{
+		Durability: Durability(3),
+	})
 	cancel()
 	require.Error(t, err)
 	require.Nil(t, r)
 
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err = session.NewReceiver(ctx, LinkTargetExpiryPolicy("not-a-real-policy"))
+	r, err = session.NewReceiver(ctx, "source", &ReceiverOptions{
+		ExpiryPolicy: ExpiryPolicy("not-a-real-policy"),
+	})
 	cancel()
 	require.Error(t, err)
 	require.Nil(t, r)
@@ -71,14 +77,12 @@ func TestReceiverMethodsNoReceive(t *testing.T) {
 	require.NoError(t, err)
 	const sourceAddr = "thesource"
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(
-		ctx,
-		LinkName(linkName),
-		LinkSourceAddress(sourceAddr),
-		LinkTargetDurability(DurabilityUnsettledState),
-		LinkTargetExpiryPolicy(ExpiryNever),
-		LinkTargetTimeout(300),
-	)
+	r, err := session.NewReceiver(ctx, sourceAddr, &ReceiverOptions{
+		Name:          linkName,
+		Durability:    DurabilityUnsettledState,
+		ExpiryPolicy:  ExpiryNever,
+		ExpiryTimeout: 300,
+	})
 	cancel()
 	require.NoError(t, err)
 	require.Equal(t, sourceAddr, r.Address())
@@ -100,7 +104,12 @@ func TestReceiverLinkSourceFilter(t *testing.T) {
 	const filterName = "myfilter"
 	const filterExp = "filter_exp"
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkAddressDynamic(), LinkSourceFilter(filterName, 0, filterExp))
+	r, err := session.NewReceiver(ctx, "ignored", &ReceiverOptions{
+		DynamicAddress: true,
+		Filters: []LinkFilter{
+			LinkFilterSource(filterName, 0, filterExp),
+		},
+	})
 	cancel()
 	require.NoError(t, err)
 	require.Equal(t, "test", r.Address())
@@ -120,7 +129,7 @@ func TestReceiverOnClosed(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -151,7 +160,7 @@ func TestReceiverOnSessionClosed(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -182,7 +191,7 @@ func TestReceiverOnConnClosed(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -213,7 +222,7 @@ func TestReceiverOnDetached(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -270,7 +279,7 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -303,7 +312,7 @@ func TestReceiveInvalidMessage(t *testing.T) {
 
 	// missing MessageFormat
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err = session.NewReceiver(ctx)
+	r, err = session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 	go func() {
@@ -332,7 +341,7 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	// missing delivery tag
 	format := uint32(0)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err = session.NewReceiver(ctx)
+	r, err = session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 	go func() {
@@ -392,7 +401,9 @@ func TestReceiveSuccessModeFirst(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeFirst))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeFirst.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -449,7 +460,9 @@ func TestReceiveSuccessModeSecondAccept(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -527,7 +540,9 @@ func TestReceiveSuccessModeSecondReject(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -599,7 +614,9 @@ func TestReceiveSuccessModeSecondRelease(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -676,7 +693,9 @@ func TestReceiveSuccessModeSecondModify(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -731,9 +750,8 @@ func TestReceiverPrefetch(t *testing.T) {
 	}
 
 	// if there are no cached messages we just return immediately - no error, no message.
-	msg, err := receiver.Prefetched()
+	msg := receiver.Prefetched()
 	require.Nil(t, msg)
-	require.Nil(t, err)
 
 	messagesCh <- Message{
 		ApplicationProperties: map[string]interface{}{
@@ -743,10 +761,9 @@ func TestReceiverPrefetch(t *testing.T) {
 	}
 
 	require.NotEmpty(t, messagesCh)
-	msg, err = receiver.Prefetched()
+	msg = receiver.Prefetched()
 
 	require.EqualValues(t, "hello", msg.ApplicationProperties["prop"].(string))
-	require.Nil(t, err)
 	require.Empty(t, messagesCh)
 }
 
@@ -778,7 +795,9 @@ func TestReceiveMultiFrameMessageSuccess(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	msgChan := make(chan *Message)
@@ -855,7 +874,9 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	msgChan := make(chan *Message)
@@ -887,7 +908,9 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 
 	// mismatched MessageFormat
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err = session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err = session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	go func() {
@@ -912,7 +935,9 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 
 	// mismatched DeliveryTag
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err = session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err = session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	go func() {
@@ -965,7 +990,9 @@ func TestReceiveMultiFrameMessageAborted(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	msgChan := make(chan *Message)
@@ -1024,7 +1051,10 @@ func TestReceiveMessageTooBig(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond), LinkMaxMessageSize(128))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+		MaxMessageSize: 128,
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -1067,7 +1097,9 @@ func TestReceiveSuccessAcceptFails(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -1130,7 +1162,12 @@ func TestReceiverDispositionBatcherTimer(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond), LinkCredit(2), LinkBatchMaxAge(time.Second), LinkBatching(true))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		Batching:       true,
+		BatchMaxAge:    time.Second,
+		Credit:         2,
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
@@ -1191,7 +1228,12 @@ func TestReceiverDispositionBatcherFull(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond), LinkCredit(credit), LinkBatchMaxAge(time.Second), LinkBatching(true))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		Batching:       true,
+		BatchMaxAge:    time.Second,
+		Credit:         credit,
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	wg := &sync.WaitGroup{}
@@ -1260,7 +1302,12 @@ func TestReceiverDispositionBatcherRelease(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx, LinkReceiverSettle(ModeSecond), LinkCredit(credit), LinkBatchMaxAge(time.Second), LinkBatching(true))
+	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
+		Batching:       true,
+		BatchMaxAge:    time.Second,
+		Credit:         credit,
+		SettlementMode: ModeSecond.Ptr(),
+	})
 	cancel()
 	require.NoError(t, err)
 	wg := &sync.WaitGroup{}
@@ -1306,7 +1353,7 @@ func TestReceiverCloseOnUnsettledWithPending(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -1337,7 +1384,7 @@ func TestReceiverConnReaderError(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -1371,7 +1418,7 @@ func TestReceiverConnWriterError(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
-	r, err := session.NewReceiver(ctx)
+	r, err := session.NewReceiver(ctx, "source", nil)
 	cancel()
 	require.NoError(t, err)
 
@@ -1396,3 +1443,5 @@ func TestReceiverConnWriterError(t *testing.T) {
 	}
 	require.Error(t, conn.Close())
 }
+
+// TODO: add unit tests for manual credit management
