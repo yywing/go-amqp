@@ -471,6 +471,18 @@ func newReceiver(source string, s *Session, opts *ReceiverOptions) (*Receiver, e
 		l.l.receiverSettleMode = opts.SettlementMode
 	}
 	l.l.target.Address = opts.TargetAddress
+	for _, v := range opts.SenderCapabilities {
+		l.l.source.Capabilities = append(l.l.source.Capabilities, encoding.Symbol(v))
+	}
+	if opts.SenderDurability != DurabilityNone {
+		l.l.source.Durable = opts.SenderDurability
+	}
+	if opts.SenderExpiryPolicy != ExpiryPolicySessionEnd {
+		l.l.source.ExpiryPolicy = opts.SenderExpiryPolicy
+	}
+	if opts.SenderExpiryTimeout != 0 {
+		l.l.source.Timeout = opts.SenderExpiryTimeout
+	}
 	return l, nil
 }
 

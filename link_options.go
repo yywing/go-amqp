@@ -7,7 +7,7 @@ import (
 )
 
 type SenderOptions struct {
-	// Capabilities is the list of extension capabilities the sender supports/desires.
+	// Capabilities is the list of extension capabilities the sender supports.
 	Capabilities []string
 
 	// Durability indicates what state of the sender will be retained durably.
@@ -63,6 +63,26 @@ type SenderOptions struct {
 
 	// SourceAddress specifies the source address for this sender.
 	SourceAddress string
+
+	// TargetCapabilities is the list of extension capabilities the sender desires.
+	TargetCapabilities []string
+
+	// TargetDurability indicates what state of the peer will be retained durably.
+	//
+	// Default: DurabilityNone.
+	TargetDurability Durability
+
+	// TargetExpiryPolicy determines when the expiry timer of the peer starts counting
+	// down from the timeout value.  If the link is subsequently re-attached before
+	// the timeout is reached, the count down is aborted.
+	//
+	// Default: ExpirySessionEnd.
+	TargetExpiryPolicy ExpiryPolicy
+
+	// ExpiryTimeout is the duration in seconds that the peer will be retained.
+	//
+	// Default: 0.
+	TargetExpiryTimeout uint32
 }
 
 type ReceiverOptions struct {
@@ -83,7 +103,7 @@ type ReceiverOptions struct {
 	// Default: 5 seconds.
 	BatchMaxAge time.Duration
 
-	// Capabilities is the list of extension capabilities the receiver supports/desires.
+	// Capabilities is the list of extension capabilities the receiver supports.
 	Capabilities []string
 
 	// Credit specifies the maximum number of unacknowledged messages
@@ -157,6 +177,26 @@ type ReceiverOptions struct {
 
 	// TargetAddress specifies the target address for this receiver.
 	TargetAddress string
+
+	// SenderCapabilities is the list of extension capabilities the receiver desires.
+	SenderCapabilities []string
+
+	// SenderDurability indicates what state of the peer will be retained durably.
+	//
+	// Default: DurabilityNone.
+	SenderDurability Durability
+
+	// SenderExpiryPolicy determines when the expiry timer of the peer starts counting
+	// down from the timeout value.  If the link is subsequently re-attached before
+	// the timeout is reached, the count down is aborted.
+	//
+	// Default: ExpirySessionEnd.
+	SenderExpiryPolicy ExpiryPolicy
+
+	// SenderExpiryTimeout is the duration in seconds that the peer will be retained.
+	//
+	// Default: 0.
+	SenderExpiryTimeout uint32
 }
 
 // LinkFilter is an advanced API for setting non-standard source filters.

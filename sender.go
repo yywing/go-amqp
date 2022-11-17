@@ -234,6 +234,18 @@ func newSender(target string, s *Session, opts *SenderOptions) (*Sender, error) 
 		l.l.senderSettleMode = opts.SettlementMode
 	}
 	l.l.source.Address = opts.SourceAddress
+	for _, v := range opts.TargetCapabilities {
+		l.l.target.Capabilities = append(l.l.target.Capabilities, encoding.Symbol(v))
+	}
+	if opts.TargetDurability != DurabilityNone {
+		l.l.target.Durable = opts.TargetDurability
+	}
+	if opts.TargetExpiryPolicy != ExpiryPolicySessionEnd {
+		l.l.target.ExpiryPolicy = opts.TargetExpiryPolicy
+	}
+	if opts.TargetExpiryTimeout != 0 {
+		l.l.target.Timeout = opts.TargetExpiryTimeout
+	}
 	return l, nil
 }
 
