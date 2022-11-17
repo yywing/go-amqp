@@ -33,7 +33,7 @@ var exampleFrames = []struct {
 				MessageFormat:      uint32Ptr(34),
 				Settled:            true,
 				More:               true,
-				ReceiverSettleMode: rcvSettle(ModeSecond),
+				ReceiverSettleMode: rcvSettle(ReceiverSettleModeSecond),
 				State:              &encoding.StateReceived{},
 				Resume:             true,
 				Aborted:            true,
@@ -293,12 +293,12 @@ var (
 			Name:               "fooName",
 			Handle:             435982,
 			Role:               encoding.RoleSender,
-			SenderSettleMode:   sndSettle(ModeMixed),
-			ReceiverSettleMode: rcvSettle(ModeSecond),
+			SenderSettleMode:   sndSettle(SenderSettleModeMixed),
+			ReceiverSettleMode: rcvSettle(ReceiverSettleModeSecond),
 			Source: &frames.Source{
 				Address:      "fooAddr",
 				Durable:      DurabilityUnsettledState,
-				ExpiryPolicy: ExpiryLinkDetach,
+				ExpiryPolicy: ExpiryPolicyLinkDetach,
 				Timeout:      635,
 				Dynamic:      true,
 				DynamicNodeProperties: map[encoding.Symbol]any{
@@ -317,7 +317,7 @@ var (
 			Target: &frames.Target{
 				Address:      "fooAddr",
 				Durable:      DurabilityUnsettledState,
-				ExpiryPolicy: ExpiryLinkDetach,
+				ExpiryPolicy: ExpiryPolicyLinkDetach,
 				Timeout:      635,
 				Dynamic:      true,
 				DynamicNodeProperties: map[encoding.Symbol]any{
@@ -344,7 +344,7 @@ var (
 		&frames.Source{
 			Address:      "fooAddr",
 			Durable:      DurabilityUnsettledState,
-			ExpiryPolicy: ExpiryLinkDetach,
+			ExpiryPolicy: ExpiryPolicyLinkDetach,
 			Timeout:      635,
 			Dynamic:      true,
 			DynamicNodeProperties: map[encoding.Symbol]any{
@@ -363,7 +363,7 @@ var (
 		&frames.Target{
 			Address:      "fooAddr",
 			Durable:      DurabilityUnsettledState,
-			ExpiryPolicy: ExpiryLinkDetach,
+			ExpiryPolicy: ExpiryPolicyLinkDetach,
 			Timeout:      635,
 			Dynamic:      true,
 			DynamicNodeProperties: map[encoding.Symbol]any{
@@ -393,7 +393,7 @@ var (
 			MessageFormat:      uint32Ptr(34),
 			Settled:            true,
 			More:               true,
-			ReceiverSettleMode: rcvSettle(ModeSecond),
+			ReceiverSettleMode: rcvSettle(ReceiverSettleModeSecond),
 			State:              &encoding.StateReceived{},
 			Resume:             true,
 			Aborted:            true,
@@ -412,7 +412,7 @@ var (
 			Handle: 4352,
 			Closed: true,
 			Error: &Error{
-				Condition:   ErrorNotAllowed,
+				Condition:   ErrCondNotAllowed,
 				Description: "foo description",
 				Info: map[string]any{
 					"other": "info",
@@ -424,7 +424,7 @@ var (
 			Handle: 4352,
 			Closed: true,
 			Error: &Error{
-				Condition:   ErrorLinkRedirect,
+				Condition:   ErrCondLinkRedirect,
 				Description: "",
 				// payload is bigger than map8 encoding size
 				Info: map[string]any{
@@ -435,9 +435,9 @@ var (
 				},
 			},
 		},
-		ErrorCondition("the condition"),
+		ErrCond("the condition"),
 		&Error{
-			Condition:   ErrorNotAllowed,
+			Condition:   ErrCondNotAllowed,
 			Description: "foo description",
 			Info: map[string]any{
 				"other": "info",
@@ -446,7 +446,7 @@ var (
 		},
 		&frames.PerformEnd{
 			Error: &Error{
-				Condition:   ErrorNotAllowed,
+				Condition:   ErrCondNotAllowed,
 				Description: "foo description",
 				Info: map[string]any{
 					"other": "info",
@@ -456,7 +456,7 @@ var (
 		},
 		&frames.PerformClose{
 			Error: &Error{
-				Condition:   ErrorNotAllowed,
+				Condition:   ErrCondNotAllowed,
 				Description: "foo description",
 				Info: map[string]any{
 					"other": "info",
@@ -575,7 +575,7 @@ var (
 		&encoding.StateAccepted{},
 		&encoding.StateRejected{
 			Error: &Error{
-				Condition:   ErrorStolen,
+				Condition:   ErrCondStolen,
 				Description: "foo description",
 				Info: map[string]any{
 					"other": "info",

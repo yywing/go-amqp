@@ -27,6 +27,10 @@
 * `Session.NewSender()` now requires `target` address and `*SenderOptions` parameters.
 * `Session.NewReceiver()` now requires `source` address and `*ReceiverOptions` parameters.
 * The various SASL configuration funcs have been slightly renamed.
+* The following constant types had their values renamed in accordance with the SDK design guidelines.
+  * `SenderSettleMode`, `ReceiverSettleMode`, `ExpiryPolicy`
+* Constant type `ErrorCondition` has been renamed to `ErrCond`.
+  * The `ErrCond` values have had their names updated to include the `ErrCond` prefix.
 
 ### Bugs Fixed
 * Fixed potential panic in `muxHandleFrame()` when checking for manual creditor.
