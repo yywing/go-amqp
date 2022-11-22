@@ -142,13 +142,13 @@ func TestReceiverOnClosed(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	require.NoError(t, r.Close(ctx))
 	cancel()
-	if err = <-errChan; !errors.Is(err, ErrLinkClosed) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	var deErr *DetachError
+	require.ErrorAs(t, <-errChan, &deErr)
 	_, err = r.Receive(context.Background())
-	if !errors.Is(err, ErrLinkClosed) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	require.ErrorAs(t, err, &deErr)
+	var amqpErr *Error
+	// there should be no inner error when closed on our side
+	require.False(t, errors.As(err, &amqpErr))
 }
 
 func TestReceiverOnSessionClosed(t *testing.T) {
@@ -173,13 +173,10 @@ func TestReceiverOnSessionClosed(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	require.NoError(t, session.Close(ctx))
 	cancel()
-	if err = <-errChan; !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	var sessionErr *SessionError
+	require.ErrorAs(t, <-errChan, &sessionErr)
 	_, err = r.Receive(context.Background())
-	if !errors.Is(err, ErrSessionClosed) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	require.ErrorAs(t, err, &sessionErr)
 }
 
 func TestReceiverOnConnClosed(t *testing.T) {
@@ -203,7 +200,7 @@ func TestReceiverOnConnClosed(t *testing.T) {
 
 	require.NoError(t, client.Close())
 	err = <-errChan
-	var connErr *ConnectionError
+	var connErr *ConnError
 	if !errors.As(err, &connErr) {
 		t.Fatalf("unexpected error type %T", err)
 	}
@@ -241,17 +238,13 @@ func TestReceiverOnDetached(t *testing.T) {
 	require.NoError(t, err)
 	conn.SendFrame(b)
 
-	var de *DetachError
-	if !errors.As(<-errChan, &de) {
-		t.Fatalf("unexpected error type %T", err)
-	}
-	require.Equal(t, ErrCond(errcon), de.RemoteError.Condition)
-	require.Equal(t, errdesc, de.RemoteError.Description)
+	var deErr *DetachError
+	require.ErrorAs(t, <-errChan, &deErr)
+	require.Equal(t, ErrCond(errcon), deErr.RemoteErr.Condition)
+	require.Equal(t, errdesc, deErr.RemoteErr.Description)
 	require.NoError(t, client.Close())
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &de) {
-		t.Fatalf("unexpected error type %T", err)
-	}
+	require.ErrorAs(t, err, &deErr)
 }
 
 func TestReceiveInvalidMessage(t *testing.T) {
@@ -299,16 +292,12 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	conn.SendFrame(fr)
 
 	require.Nil(t, <-msgChan)
-	var amqpErr *Error
-	if err = <-errChan; !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondNotAllowed, amqpErr.Condition)
+	var detachErr *DetachError
+	require.ErrorAs(t, <-errChan, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondNotAllowed)
 
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	require.ErrorAs(t, err, &detachErr)
 
 	// missing MessageFormat
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
@@ -328,15 +317,11 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	conn.SendFrame(fr)
 
 	require.Nil(t, <-msgChan)
-	if err = <-errChan; !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondNotAllowed, amqpErr.Condition)
+	require.ErrorAs(t, <-errChan, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondNotAllowed)
 
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	require.ErrorAs(t, err, &detachErr)
 
 	// missing delivery tag
 	format := uint32(0)
@@ -358,15 +343,11 @@ func TestReceiveInvalidMessage(t *testing.T) {
 	conn.SendFrame(fr)
 
 	require.Nil(t, <-msgChan)
-	if err = <-errChan; !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondNotAllowed, amqpErr.Condition)
+	require.ErrorAs(t, <-errChan, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondNotAllowed)
 
 	_, err = r.Receive(context.Background())
-	if !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
+	require.ErrorAs(t, err, &detachErr)
 
 	require.NoError(t, client.Close())
 }
@@ -564,7 +545,8 @@ func TestReceiveSuccessReceiverSettleModeSecondAcceptOnClosedLink(t *testing.T) 
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	err = r.AcceptMessage(ctx, msg)
 	cancel()
-	require.ErrorIs(t, err, ErrLinkClosed)
+	var deErr *DetachError
+	require.ErrorAs(t, err, &deErr)
 }
 
 func TestReceiveSuccessReceiverSettleModeSecondReject(t *testing.T) {
@@ -958,11 +940,9 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	}))
 	msg := <-msgChan
 	require.Nil(t, msg)
-	var amqpErr *Error
-	if err = <-errChan; !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondNotAllowed, amqpErr.Condition)
+	var detachErr *DetachError
+	require.ErrorAs(t, <-errChan, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondNotAllowed)
 
 	// mismatched MessageFormat
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
@@ -986,10 +966,8 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	}))
 	msg = <-msgChan
 	require.Nil(t, msg)
-	if err = <-errChan; !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondNotAllowed, amqpErr.Condition)
+	require.ErrorAs(t, <-errChan, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondNotAllowed)
 
 	// mismatched DeliveryTag
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
@@ -1012,10 +990,8 @@ func TestReceiveInvalidMultiFrameMessage(t *testing.T) {
 	}))
 	msg = <-msgChan
 	require.Nil(t, msg)
-	if err = <-errChan; !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondNotAllowed, amqpErr.Condition)
+	require.ErrorAs(t, <-errChan, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondNotAllowed)
 
 	require.NoError(t, client.Close())
 }
@@ -1119,11 +1095,9 @@ func TestReceiveMessageTooBig(t *testing.T) {
 	msg, err := r.Receive(ctx)
 	cancel()
 	require.Nil(t, msg)
-	var amqpErr *Error
-	if !errors.As(err, &amqpErr) {
-		t.Fatalf("unexpected error %v", err)
-	}
-	require.Equal(t, ErrCondMessageSizeExceeded, amqpErr.Condition)
+	var detachErr *DetachError
+	require.ErrorAs(t, err, &detachErr)
+	require.Contains(t, detachErr.Error(), ErrCondMessageSizeExceeded)
 	require.NoError(t, client.Close())
 }
 
@@ -1178,7 +1152,7 @@ func TestReceiveSuccessAcceptFails(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	err = r.AcceptMessage(ctx, msg)
 	cancel()
-	var connErr *ConnectionError
+	var connErr *ConnError
 	if !errors.As(err, &connErr) {
 		t.Fatalf("unexpected error type %T", err)
 	}
@@ -1452,7 +1426,7 @@ func TestReceiverConnReaderError(t *testing.T) {
 	conn.ReadErr <- errors.New("failed")
 
 	err = <-errChan
-	var connErr *ConnectionError
+	var connErr *ConnError
 	if !errors.As(err, &connErr) {
 		t.Fatalf("unexpected error type %T", err)
 	}
@@ -1487,7 +1461,7 @@ func TestReceiverConnWriterError(t *testing.T) {
 	conn.SendKeepAlive()
 
 	err = <-errChan
-	var connErr *ConnectionError
+	var connErr *ConnError
 	if !errors.As(err, &connErr) {
 		t.Fatalf("unexpected error type %T", err)
 	}

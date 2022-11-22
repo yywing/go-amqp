@@ -1,9 +1,6 @@
 package amqp
 
 import (
-	"errors"
-	"fmt"
-
 	"github.com/Azure/go-amqp/internal/encoding"
 )
 
@@ -47,39 +44,61 @@ const (
 	ErrCondTransferLimitExceeded ErrCond = "amqp:link:transfer-limit-exceeded"
 )
 
+// Error is an AMQP error.
 type Error = encoding.Error
 
-// DetachError is returned by a link (Receiver/Sender) when a detach frame is received.
-//
-// RemoteError will be nil if the link was detached gracefully.
+// DetachError is returned by methods on Sender/Receiver when the link has become detached/closed.
 type DetachError struct {
-	RemoteError *Error
-}
+	// RemoteErr contains any error information provided by the peer if the peer detached the link.
+	RemoteErr *Error
 
-func (e *DetachError) Error() string {
-	return fmt.Sprintf("link detached, reason: %+v", e.RemoteError)
-}
-
-// Errors
-var (
-	// ErrSessionClosed is propagated to Sender/Receivers
-	// when Session.Close() is called.
-	ErrSessionClosed = errors.New("amqp: session closed")
-
-	// ErrLinkClosed is returned by send and receive operations when
-	// Sender.Close() or Receiver.Close() are called.
-	ErrLinkClosed = errors.New("amqp: link closed")
-)
-
-// ConnectionError is propagated to Session and Senders/Receivers
-// when the connection has been closed or is no longer functional.
-type ConnectionError struct {
 	inner error
 }
 
-func (c *ConnectionError) Error() string {
-	if c.inner == nil {
-		return "amqp: connection closed"
+// Error implements the error interface for DetachError.
+func (e *DetachError) Error() string {
+	if e.RemoteErr == nil && e.inner == nil {
+		return "amqp: link closed"
+	} else if e.RemoteErr != nil {
+		return e.RemoteErr.Error()
 	}
-	return c.inner.Error()
+	return e.inner.Error()
+}
+
+// ConnError is returned by methods on Conn and propagated to Session and Senders/Receivers
+// when the connection has been closed.
+type ConnError struct {
+	// RemoteErr contains any error information provided by the peer if the peer closed the AMQP connection.
+	RemoteErr *Error
+
+	inner error
+}
+
+// Error implements the error interface for ConnectionError.
+func (e *ConnError) Error() string {
+	if e.RemoteErr == nil && e.inner == nil {
+		return "amqp: connection closed"
+	} else if e.RemoteErr != nil {
+		return e.RemoteErr.Error()
+	}
+	return e.inner.Error()
+}
+
+// SessionError is returned by methods on Session and propagated to Senders/Receivers
+// when the session has been closed.
+type SessionError struct {
+	// RemoteErr contains any error information provided by the peer if the peer closed the session.
+	RemoteErr *Error
+
+	inner error
+}
+
+// Error implements the error interface for SessionError.
+func (e *SessionError) Error() string {
+	if e.RemoteErr == nil && e.inner == nil {
+		return "amqp: session closed"
+	} else if e.RemoteErr != nil {
+		return e.RemoteErr.Error()
+	}
+	return e.inner.Error()
 }

@@ -91,7 +91,11 @@ func TestSessionServerClose(t *testing.T) {
 	err = session.Close(ctx)
 	cancel()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "session ended by server")
+	var sessionErr *SessionError
+	require.ErrorAs(t, err, &sessionErr)
+	require.NotNil(t, sessionErr.RemoteErr)
+	require.Equal(t, ErrCond("closing"), sessionErr.RemoteErr.Condition)
+	require.Equal(t, "server side close", sessionErr.RemoteErr.Description)
 	require.NoError(t, client.Close())
 }
 
@@ -147,6 +151,11 @@ func TestConnCloseSessionClose(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("session wasn't closed")
 	}
+
+	rcv, err := session.NewReceiver(context.Background(), "blah", nil)
+	require.Nil(t, rcv)
+	var connErr *ConnError
+	require.ErrorAs(t, err, &connErr)
 }
 
 func TestSessionNewReceiverBadOptionFails(t *testing.T) {
