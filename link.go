@@ -90,38 +90,19 @@ func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAtta
 	// send Attach frame
 	debug.Log(1, "TX (attachLink): %s", attach)
 
-	// we use send to have positive confirmation on transmission
-	send := make(chan encoding.DeliveryState)
-	_ = l.session.txFrame(attach, send)
+	_ = l.session.txFrame(attach, nil)
 
 	// wait for response
 	var fr frames.FrameBody
 	select {
 	case <-ctx.Done():
-		select {
-		case <-send:
-			// attach was written to the network. assume it was received
-			// and that the ctx was too short to wait for the ack. in this
-			// case we must send a detach before deallocation
-			go func() {
-				_ = l.session.txFrame(&frames.PerformDetach{
-					Handle: l.handle,
-					Closed: true,
-				}, nil)
-				select {
-				case <-l.session.done:
-					// session has terminated, no need to deallocate in this case
-				case <-time.After(5 * time.Second):
-					debug.Log(3, "link.attach() clean-up timed out waiting for ack")
-				case <-l.rx:
-					// received ack, safe to delete handle
-					l.session.deallocateHandle(l)
-				}
-			}()
-		default:
-			// attach wasn't written to the network, so delete the handle
-			l.session.deallocateHandle(l)
-		}
+		// attach was written to the network. assume it was received
+		// and that the ctx was too short to wait for the ack.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			l.muxDetach(ctx, nil, nil)
+		}()
 		return ctx.Err()
 	case <-l.session.done:
 		// session has terminated, no need to deallocate in this case
@@ -149,11 +130,9 @@ func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAtta
 		case <-ctx.Done():
 			// if we don't send an ack then we're in violation of the protocol
 			go func() {
-				_ = l.session.txFrame(&frames.PerformDetach{
-					Handle: l.handle,
-					Closed: true,
-				}, nil)
-				l.session.deallocateHandle(l)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				l.muxDetach(ctx, nil, nil)
 			}()
 			return ctx.Err()
 		case <-l.session.done:
@@ -189,7 +168,7 @@ func (l *link) attach(ctx context.Context, beforeAttach func(*frames.PerformAtta
 	afterAttach(resp)
 
 	if err := l.setSettleModes(resp); err != nil {
-		l.muxDetach(nil, nil)
+		l.muxDetach(ctx, nil, nil)
 		return err
 	}
 
@@ -266,12 +245,18 @@ func (l *link) closeLink(ctx context.Context) error {
 	return l.err
 }
 
-func (l *link) muxDetach(deferred func(), onRXTransfer func(frames.PerformTransfer)) {
+func (l *link) muxDetach(ctx context.Context, deferred func(), onRXTransfer func(frames.PerformTransfer)) {
 	defer func() {
 		// final cleanup and signaling
 
-		// deallocate handle
-		l.session.deallocateHandle(l)
+		// if the context timed out or was cancelled we don't really know
+		// if the link has been properly terminated.  in this case, it might
+		// not be safe to reuse the handle as it might still be associated
+		// with an existing link.
+		if ctx.Err() == nil {
+			// deallocate handle
+			l.session.deallocateHandle(l)
+		}
 
 		if deferred != nil {
 			deferred()
@@ -305,6 +290,8 @@ func (l *link) muxDetach(deferred func(), onRXTransfer func(frames.PerformTransf
 Loop:
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case l.session.tx <- fr:
 			// after sending the detach frame, break the read loop
 			break Loop
@@ -335,6 +322,9 @@ Loop:
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
+
 		// read from link until detach with Close == true is received
 		case fr := <-l.rx:
 			switch fr := fr.(type) {
