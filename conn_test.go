@@ -316,30 +316,44 @@ func TestClose(t *testing.T) {
 }
 
 func TestServerSideClose(t *testing.T) {
-	netConn := mocks.NewNetConn(senderFrameHandlerNoUnhandled(SenderSettleModeUnsettled))
+	closeReceived := make(chan struct{})
+	responder := func(req frames.FrameBody) ([]byte, error) {
+		switch req.(type) {
+		case *mocks.AMQPProto:
+			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
+		case *frames.PerformOpen:
+			return mocks.PerformOpen("container")
+		case *frames.PerformClose:
+			close(closeReceived)
+			return mocks.PerformClose(nil)
+		default:
+			return nil, fmt.Errorf("unhandled frame %T", req)
+		}
+	}
+	netConn := mocks.NewNetConn(responder)
 	conn, err := newConn(netConn, nil)
 	require.NoError(t, err)
 	require.NoError(t, conn.start())
 	fr, err := mocks.PerformClose(nil)
 	require.NoError(t, err)
 	netConn.SendFrame(fr)
+	<-closeReceived
 	err = conn.Close()
 	require.NoError(t, err)
+
 	// with error
-	netConn = mocks.NewNetConn(senderFrameHandlerNoUnhandled(SenderSettleModeUnsettled))
+	closeReceived = make(chan struct{})
+	netConn = mocks.NewNetConn(responder)
 	conn, err = newConn(netConn, nil)
 	require.NoError(t, err)
 	require.NoError(t, conn.start())
 	fr, err = mocks.PerformClose(&Error{Condition: "Close", Description: "mock server error"})
 	require.NoError(t, err)
 	netConn.SendFrame(fr)
-	// wait a bit for connReader to read from the mock
-	time.Sleep(100 * time.Millisecond)
+	<-closeReceived
 	err = conn.Close()
 	var connErr *ConnError
-	if !errors.As(err, &connErr) {
-		t.Fatalf("unexpected error type %T", err)
-	}
+	require.ErrorAs(t, err, &connErr)
 	require.Equal(t, "*Error{Condition: Close, Description: mock server error, Info: map[]}", connErr.Error())
 }
 
@@ -358,6 +372,8 @@ func TestKeepAlives(t *testing.T) {
 		case *mocks.KeepAlive:
 			keepAlives <- struct{}{}
 			return nil, nil
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
 		default:
 			return nil, fmt.Errorf("unhandled frame %T", req)
 		}
@@ -377,6 +393,48 @@ func TestKeepAlives(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("didn't receive any keepalive frames")
 	}
+	require.NoError(t, conn.Close())
+}
+
+func TestKeepAlivesIdleTimeout(t *testing.T) {
+	responder := func(req frames.FrameBody) ([]byte, error) {
+		switch req.(type) {
+		case *mocks.AMQPProto:
+			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
+		case *frames.PerformOpen:
+			return mocks.EncodeFrame(mocks.FrameAMQP, 0, &frames.PerformOpen{ContainerID: "container", IdleTimeout: time.Minute})
+		case *mocks.KeepAlive:
+			return nil, nil
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
+		default:
+			return nil, fmt.Errorf("unhandled frame %T", req)
+		}
+	}
+
+	const idleTimeout = 100 * time.Millisecond
+
+	netConn := mocks.NewNetConn(responder)
+	conn, err := newConn(netConn, &ConnOptions{
+		IdleTimeout: idleTimeout,
+	})
+	require.NoError(t, err)
+	require.NoError(t, conn.start())
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-time.After(idleTimeout / 2):
+				netConn.SendKeepAlive()
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	time.Sleep(2 * idleTimeout)
 	require.NoError(t, conn.Close())
 }
 
@@ -413,6 +471,29 @@ func TestConnWriterError(t *testing.T) {
 	if !errors.As(err, &connErr) {
 		t.Fatalf("unexpected error type %T", err)
 	}
+}
+
+func TestConnWithZeroByteReads(t *testing.T) {
+	responder := func(req frames.FrameBody) ([]byte, error) {
+		switch req.(type) {
+		case *mocks.AMQPProto:
+			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
+		case *frames.PerformOpen:
+			return mocks.PerformOpen("container")
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
+		default:
+			return nil, fmt.Errorf("unhandled frame %T", req)
+		}
+	}
+
+	netConn := mocks.NewNetConn(responder)
+	netConn.SendFrame([]byte{})
+
+	conn, err := newConn(netConn, nil)
+	require.NoError(t, err)
+	require.NoError(t, conn.start())
+	require.NoError(t, conn.Close())
 }
 
 type mockDialer struct {
@@ -465,6 +546,8 @@ func TestClientClose(t *testing.T) {
 			return []byte{'A', 'M', 'Q', 'P', 0, 1, 0, 0}, nil
 		case *frames.PerformOpen:
 			return mocks.PerformOpen("container")
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
 		default:
 			return nil, fmt.Errorf("unhandled frame %T", req)
 		}
@@ -551,6 +634,8 @@ func TestClientNewSession(t *testing.T) {
 				return nil, fmt.Errorf("unexpected incoming window %d", tt.OutgoingWindow)
 			}
 			return mocks.PerformBegin(channelNum)
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
 		default:
 			return nil, fmt.Errorf("unhandled frame %T", req)
 		}
@@ -593,6 +678,8 @@ func TestClientMultipleSessions(t *testing.T) {
 			b, err := mocks.PerformBegin(channelNum)
 			channelNum++
 			return b, err
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
 		default:
 			return nil, fmt.Errorf("unhandled frame %T", req)
 		}
@@ -636,6 +723,8 @@ func TestClientTooManySessions(t *testing.T) {
 			b, err := mocks.PerformBegin(channelNum)
 			channelNum++
 			return b, err
+		case *frames.PerformClose:
+			return mocks.PerformClose(nil)
 		default:
 			return nil, fmt.Errorf("unhandled frame %T", req)
 		}
