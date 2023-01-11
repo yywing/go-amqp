@@ -364,6 +364,13 @@ func (r *Receiver) messageDisposition(ctx context.Context, msg *Message, state e
 	}
 
 	if wait == nil {
+		// mode first, there will be no settlement ack
+		r.deleteUnsettled(msg)
+		// cause mux() to check our flow conditions.
+		select {
+		case r.receiverReady <- struct{}{}:
+		default:
+		}
 		return nil
 	}
 
@@ -548,9 +555,12 @@ func (r *Receiver) mux() {
 
 	for {
 		// max - (availableCredit + countUnsettled) == pending credit (i.e. credit we can reclaim)
-		// once we have pending credit equal to or greater than half our max, reclaim it.  we do this
-		// instead of pending > 0 to prevent flow frames from being too chatty.
-		if pendingCredit := r.maxCredit - (r.l.availableCredit + uint32(r.countUnsettled())); pendingCredit >= r.maxCredit/2 && r.autoSendFlow {
+		// once we have pending credit equal to or greater than our available credit, reclaim it.
+		// we do this instead of pending > 0 to prevent flow frames from being too chatty.
+		// NOTE: pendingCredit can be > 0 but not >= max/2, so use available credit as the threshold.
+		// this ensures that any pending credit can be reclaimed if the number of unsettled messages
+		// remains greater than half the link's max credit.
+		if pendingCredit := r.maxCredit - (r.l.availableCredit + uint32(r.countUnsettled())); pendingCredit > 0 && pendingCredit >= r.l.availableCredit && r.autoSendFlow {
 			debug.Log(1, "receiver (auto): source: %s, inflight: %d, credit: %d, deliveryCount: %d, messages: %d, unsettled: %d, maxCredit: %d, settleMode: %s", r.l.source.Address, r.inFlight.len(), r.l.availableCredit, r.l.deliveryCount, len(r.messages), r.countUnsettled(), r.maxCredit, r.l.receiverSettleMode.String())
 			r.l.err = r.creditor.IssueCredit(pendingCredit, r)
 		} else if r.l.availableCredit == 0 {
@@ -805,7 +815,7 @@ func (r *Receiver) muxReceive(fr frames.PerformTransfer) error {
 	}
 	debug.Log(1, "deliveryID %d before push to receiver - deliveryCount : %d - linkCredit: %d, len(messages): %d, len(inflight): %d", r.msg.deliveryID, r.l.deliveryCount, r.l.availableCredit, len(r.messages), r.inFlight.len())
 	// send to receiver
-	if receiverSettleModeValue(r.l.receiverSettleMode) == ReceiverSettleModeSecond {
+	if !r.msg.settled {
 		r.addUnsettled(&r.msg)
 	}
 	select {
