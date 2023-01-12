@@ -252,12 +252,6 @@ func newSender(target string, session *Session, opts *SenderOptions) (*Sender, e
 }
 
 func (s *Sender) attach(ctx context.Context) error {
-	// sending unsettled messages when the receiver is in mode-second is currently
-	// broken and causes a hang after sending, so just disallow it for now.
-	if senderSettleModeValue(s.l.senderSettleMode) != SenderSettleModeSettled && receiverSettleModeValue(s.l.receiverSettleMode) == ReceiverSettleModeSecond {
-		return errors.New("sender does not support exactly-once guarantee")
-	}
-
 	s.l.rx = make(chan frames.FrameBody, 1)
 
 	if err := s.l.attach(ctx, func(pa *frames.PerformAttach) {
@@ -289,6 +283,11 @@ func (s *Sender) attach(ctx context.Context) error {
 func (s *Sender) mux() {
 	defer s.l.muxDetach(context.Background(), nil, nil)
 
+	// used to track and send disposition frames.
+	// frames are sent in FIFO order.
+	outgoingDisp := make(chan *frames.PerformDisposition, 1)
+	outgoingDisps := []*frames.PerformDisposition{}
+
 Loop:
 	for {
 		var outgoingTransfers chan frames.PerformTransfer
@@ -297,11 +296,46 @@ Loop:
 			outgoingTransfers = s.transfers
 		}
 
+		if len(outgoingDisps) > 0 && len(outgoingDisp) == 0 {
+			// queue up the next outgoing frame and remove it from the slice
+			outgoingDisp <- outgoingDisps[0]
+			outgoingDisps = outgoingDisps[1:]
+		}
+
+		handleFrame := func(fr frames.FrameBody) error {
+			var disp *frames.PerformDisposition
+			disp, s.l.err = s.muxHandleFrame(fr)
+			if s.l.err != nil {
+				return s.l.err
+			} else if disp != nil {
+				outgoingDisps = append(outgoingDisps, disp)
+			}
+			return nil
+		}
+
 		select {
+		case dr := <-outgoingDisp:
+			debug.Log(3, "TX (sender): %s", dr)
+
+			// Ensure the session mux is not blocked
+			for {
+				select {
+				case s.l.session.tx <- dr:
+					continue Loop
+				case fr := <-s.l.rx:
+					if err := handleFrame(fr); err != nil {
+						return
+					}
+				case <-s.l.close:
+					continue Loop
+				case <-s.l.session.done:
+					continue Loop
+				}
+			}
+
 		// received frame
 		case fr := <-s.l.rx:
-			s.l.err = s.muxHandleFrame(fr)
-			if s.l.err != nil {
+			if err := handleFrame(fr); err != nil {
 				return
 			}
 
@@ -322,16 +356,13 @@ Loop:
 					}
 					continue Loop
 				case fr := <-s.l.rx:
-					s.l.err = s.muxHandleFrame(fr)
-					if s.l.err != nil {
+					if err := handleFrame(fr); err != nil {
 						return
 					}
 				case <-s.l.close:
-					s.l.err = &DetachError{}
-					return
+					continue Loop
 				case <-s.l.session.done:
-					s.l.err = s.l.session.doneErr
-					return
+					continue Loop
 				}
 			}
 
@@ -346,7 +377,8 @@ Loop:
 }
 
 // muxHandleFrame processes fr based on type.
-func (s *Sender) muxHandleFrame(fr frames.FrameBody) error {
+// depending on the peer's RSM, it might return a disposition frame for sending
+func (s *Sender) muxHandleFrame(fr frames.FrameBody) (*frames.PerformDisposition, error) {
 	switch fr := fr.(type) {
 	// flow control frame
 	case *frames.PerformFlow:
@@ -361,7 +393,7 @@ func (s *Sender) muxHandleFrame(fr frames.FrameBody) error {
 		s.l.availableCredit = linkCredit
 
 		if !fr.Echo {
-			return nil
+			return nil, nil
 		}
 
 		var (
@@ -385,27 +417,28 @@ func (s *Sender) muxHandleFrame(fr frames.FrameBody) error {
 		//
 		// This isn't ideal, but there isn't a clear better way to handle it.
 		if fr, ok := fr.State.(*encoding.StateRejected); ok && s.detachOnRejectDisp() {
-			return &DetachError{RemoteErr: fr.Error}
+			return nil, &DetachError{RemoteErr: fr.Error}
 		}
 
 		if fr.Settled {
-			return nil
+			return nil, nil
 		}
 
-		resp := &frames.PerformDisposition{
+		// peer is in mode second, so we must send confirmation of disposition.
+		// NOTE: the ack must be sent through the session so it can close out
+		// the in-flight disposition.
+		return &frames.PerformDisposition{
 			Role:    encoding.RoleSender,
 			First:   fr.First,
 			Last:    fr.Last,
 			Settled: true,
-		}
-		debug.Log(1, "TX (sender): %s", resp)
-		_ = s.l.session.txFrame(resp, nil)
+		}, nil
 
 	default:
-		return s.l.muxHandleFrame(fr)
+		return nil, s.l.muxHandleFrame(fr)
 	}
 
-	return nil
+	return nil, nil
 }
 
 func (s *Sender) detachOnRejectDisp() bool {

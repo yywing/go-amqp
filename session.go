@@ -545,6 +545,30 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 
 		case fr := <-s.tx:
 			switch fr := fr.(type) {
+			case *frames.PerformDisposition:
+				if fr.Settled && fr.Role == encoding.RoleSender {
+					// sender with a peer that's in mode second; sending confirmation of disposition.
+					// disposition frames can reference a range of delivery IDs, although it's highly
+					// likely in this case there will only be one.
+					start := fr.First
+					end := start
+					if fr.Last != nil {
+						end = *fr.Last
+					}
+					for deliveryID := start; deliveryID <= end; deliveryID++ {
+						// send delivery state to the channel and close it to signal
+						// that the delivery has completed.
+						if done, ok := settlementByDeliveryID[deliveryID]; ok {
+							delete(settlementByDeliveryID, deliveryID)
+							select {
+							case done <- fr.State:
+							default:
+							}
+							close(done)
+						}
+					}
+				}
+				_ = s.txFrame(fr, nil)
 			case *frames.PerformFlow:
 				niID := nextIncomingID
 				fr.NextIncomingID = &niID
