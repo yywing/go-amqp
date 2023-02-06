@@ -11,6 +11,7 @@
 
 * Don't discard incoming frames while closing a Session.
 * Client-side termination of a Session due to invalid state will wait for the peer to acknowledge the Session's end.
+* Fixed an issue that could cause `creditor.Drain()` to return the wrong error when a link is terminated.
 
 ## 0.18.1 (2023-01-17)
 
