@@ -60,11 +60,13 @@ type Session struct {
 	linksByKey map[linkKey]*link // mapping of name+role link
 	handles    *bitmap.Bitmap    // allocated handles
 
-	// used for gracefully closing link
-	close     chan struct{}
+	// used for gracefully closing session
+	close     chan *Error
 	closeOnce sync.Once
-	done      chan struct{} // part of internal public surface area
-	doneErr   error         // contains the error state returned from Close(); DO NOT TOUCH outside of session.go until done has been closed!
+
+	// part of internal public surface area
+	done    chan struct{} // closed when the session has terminated
+	doneErr error         // contains the error state returned from Close(); DO NOT TOUCH outside of session.go until done has been closed!
 }
 
 func newSession(c *Conn, channel uint16, opts *SessionOptions) *Session {
@@ -79,7 +81,7 @@ func newSession(c *Conn, channel uint16, opts *SessionOptions) *Session {
 		handleMax:      math.MaxUint32,
 		linksMu:        sync.RWMutex{},
 		linksByKey:     make(map[linkKey]*link),
-		close:          make(chan struct{}),
+		close:          make(chan *Error, 1), // buffered so we can queue up an error from the mux
 		done:           make(chan struct{}),
 	}
 
@@ -167,11 +169,14 @@ func (s *Session) begin(ctx context.Context) error {
 // The session will continue to wait for the response until the Client is closed.
 func (s *Session) Close(ctx context.Context) error {
 	s.closeOnce.Do(func() { close(s.close) })
+
 	select {
 	case <-s.done:
+		// mux has exited
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+
 	var sessionErr *SessionError
 	if errors.As(s.doneErr, &sessionErr) && sessionErr.RemoteErr == nil && sessionErr.inner == nil {
 		// an empty SessionError means the session was closed by the caller
@@ -264,6 +269,8 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 		nextIncomingID       = remoteBegin.NextOutgoingID
 		remoteIncomingWindow = remoteBegin.IncomingWindow
 		remoteOutgoingWindow = remoteBegin.OutgoingWindow
+
+		clientClosed bool // indicates a client-side close
 	)
 
 	for {
@@ -276,6 +283,12 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 			txTransfer = nil
 		}
 
+		closed := s.close
+		if clientClosed {
+			// swap out channel so it no longer triggers
+			closed = nil
+		}
+
 		select {
 		// conn has completed, exit
 		case <-s.conn.done:
@@ -283,28 +296,14 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 			return
 
 		// session is being closed by user
-		case <-s.close:
-			_ = s.txFrame(&frames.PerformEnd{}, nil)
+		case err := <-closed:
+			clientClosed = true
+			fr := frames.PerformEnd{Error: err}
+			debug.Log(1, "TX(Session): %s", fr)
+			_ = s.txFrame(&fr, nil)
+			// TODO: per spec, after end has been sent, the session is no longer allowed to send frames
 
-			// wait for the ack that the session is closed.
-			// we can't exit the mux, which deletes the session,
-			// until we receive it.
-		EndLoop:
-			for {
-				select {
-				case fr := <-s.rx:
-					_, ok := fr.Body.(*frames.PerformEnd)
-					if ok {
-						break EndLoop
-					}
-				case <-s.conn.done:
-					s.doneErr = s.conn.doneErr
-					return
-				}
-			}
-			return
-
-		// incoming frame for link
+		// incoming frame
 		case fr := <-s.rx:
 			debug.Log(1, "RX(Session): %s", fr.Body)
 
@@ -356,14 +355,12 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 					// This is a protocol error:
 					//       "[...] MUST be set if the peer has received
 					//        the begin frame for the session"
-					_ = s.txFrame(&frames.PerformEnd{
-						Error: &Error{
-							Condition:   ErrCondNotAllowed,
-							Description: "next-incoming-id not set after session established",
-						},
-					}, nil)
+					s.close <- &Error{
+						Condition:   ErrCondNotAllowed,
+						Description: "next-incoming-id not set after session established",
+					}
 					s.doneErr = errors.New("protocol error: received flow without next-incoming-id after session established")
-					return
+					continue
 				}
 
 				// "When the endpoint receives a flow frame from its peer,
@@ -418,8 +415,12 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 				link, linkOk := s.linksByKey[linkKey{name: body.Name, role: !body.Role}]
 				s.linksMu.RUnlock()
 				if !linkOk {
+					s.close <- &Error{
+						Condition:   ErrCondNotAllowed,
+						Description: "received mismatched attach frame",
+					}
 					s.doneErr = fmt.Errorf("protocol error: received mismatched attach frame %+v", body)
-					return
+					continue
 				}
 
 				link.remoteHandle = body.Handle
@@ -488,10 +489,24 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 				delete(deliveryIDByHandle, link.handle)
 
 			case *frames.PerformEnd:
-				_ = s.txFrame(&frames.PerformEnd{}, nil)
+				// there are two possibilities:
+				// - this is the ack to a client-side Close()
+				// - the peer is ending the session so we must ack
+
+				if clientClosed {
+					return
+				}
+
+				// TODO: per spec, when end is received, we're no longer allowed to receive frames
+
+				// peer detached us with an error, save it and send the ack
 				if body.Error != nil {
 					s.doneErr = body.Error
 				}
+
+				fr := frames.PerformEnd{}
+				debug.Log(1, "TX(Session): %s", fr)
+				_ = s.txFrame(&fr, nil)
 				return
 
 			default:
