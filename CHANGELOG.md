@@ -7,10 +7,12 @@
 * `Dial()` and `NewConn()` now require a `context.Context` as their first parameter.
   * As a result, the `ConnOptions.Timeout` field has been removed.
 * Methods `Sender.Send()` and `Receiver.Receive()` now take their respective options-type as the final argument.
-* The `Credit` field in `ReceiverOptions` has been renamed to `MaxCredit` to better reflect its purpose.
+* The `ManualCredits` field in `ReceiverOptions` has been consolidated into field `Credit`.
 * Renamed fields in the `ReceiverOptions` for configuring options on the source.
 * Renamed `DetachError` to `LinkError` as "detach" has a specific meaning which doesn't equate to the returned link errors.
 * The `Receiver.DrainCredit()` API has been removed.
+* The `Batching` field in `ReceiverOptions` has been renamed to `BatchSize` and its type changed to `uint32`.
+* The `IncomingWindow` and `OutgoingWindow` fields in `SessionOptions` have been removed.
 
 ### Bugs Fixed
 
@@ -27,6 +29,7 @@
   * DEBUG_LEVEL 1 now captures all sent/received frames along with basic flow control information.
   * Higher debug levels add entries when a frame transitions across mux boundaries and other diagnostics info.
 * Document default values for incoming and outgoing windows.
+* Refactored handling of incoming frames to eliminate potential deadlocks due to "mux pumping".
 
 ## 0.18.1 (2023-01-17)
 

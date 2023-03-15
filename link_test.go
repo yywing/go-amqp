@@ -9,31 +9,24 @@ import (
 	"github.com/Azure/go-amqp/internal/encoding"
 	"github.com/Azure/go-amqp/internal/fake"
 	"github.com/Azure/go-amqp/internal/frames"
+	"github.com/Azure/go-amqp/internal/queue"
 	"github.com/stretchr/testify/require"
 )
 
 func TestLinkFlowThatNeedsToReplenishCredits(t *testing.T) {
 	for times := 0; times < 100; times++ {
 		l := newTestLink(t)
+		l.l.linkCredit = 2
 		go l.mux()
 
 		err := l.IssueCredit(1)
 		require.Error(t, err, "issueCredit can only be used with receiver links using manual credit management")
 
-		// and flow goes through the non-manual credit path
-		require.EqualValues(t, 0, l.l.linkCredit, "No link credits have been added")
-
 		// we've consumed half of the maximum credit we're allowed to have - reflow!
-		l.maxCredit = 2
 		l.l.linkCredit = 1
 		l.unsettledMessages = map[string]struct{}{}
 
-		select {
-		case l.receiverReady <- struct{}{}:
-			// woke up mux
-		default:
-			t.Fatal("failed to wake up mux")
-		}
+		l.onSettlement(1)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	Loop:
@@ -74,7 +67,6 @@ func TestLinkFlowWithZeroCredits(t *testing.T) {
 	// and flow goes through the non-manual credit path
 	require.EqualValues(t, 0, l.l.linkCredit, "No link credits have been added")
 
-	l.maxCredit = 2
 	l.l.linkCredit = 0
 	l.unsettledMessages = map[string]struct{}{
 		"hello":  {},
@@ -95,7 +87,6 @@ func TestLinkFlowWithManualCreditor(t *testing.T) {
 	l := newTestLink(t)
 	l.autoSendFlow = false
 	l.l.linkCredit = 1
-	l.maxCredit = 1000
 	go l.mux()
 	defer close(l.l.close)
 
@@ -111,17 +102,6 @@ func TestLinkFlowWithManualCreditor(t *testing.T) {
 	default:
 		require.Fail(t, fmt.Sprintf("Unexpected frame was transferred: %+v", txFrame))
 	}
-}
-
-func TestLinkFlowWithManualCreditorTooManyCredits(t *testing.T) {
-	l := newTestLink(t)
-	l.autoSendFlow = false
-	l.l.linkCredit = 1
-	l.maxCredit = 100
-	go l.mux()
-	defer close(l.l.close)
-
-	require.Error(t, l.IssueCredit(100))
 }
 
 func TestLinkFlowWithManualCreditorAndNoFlowNeeded(t *testing.T) {
@@ -175,13 +155,15 @@ func newTestLink(t *testing.T) *Receiver {
 				tx:   make(chan frames.FrameBody, 100),
 				done: make(chan struct{}),
 			},
-			rx:    make(chan frames.FrameBody, 100),
+			rxQ:   queue.NewHolder(queue.New[frames.FrameBody](100)),
 			close: make(chan struct{}),
 		},
 		autoSendFlow:  true,
 		inFlight:      inFlight{},
 		receiverReady: make(chan struct{}, 1),
 	}
+
+	l.messagesQ = queue.NewHolder(queue.New[Message](100))
 
 	return l
 }
@@ -250,7 +232,7 @@ func TestNewSendingLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.label, func(t *testing.T) {
-			got, err := newSender(targetAddr, nil, &tt.opts)
+			got, err := newSender(targetAddr, &Session{}, &tt.opts)
 			require.NoError(t, err)
 			require.NotNil(t, got)
 			tt.validate(t, got)
@@ -356,7 +338,7 @@ func TestNewReceivingLink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.label, func(t *testing.T) {
-			got, err := newReceiver(sourceAddr, nil, &tt.opts)
+			got, err := newReceiver(sourceAddr, &Session{}, &tt.opts)
 			require.NoError(t, err)
 			require.NotNil(t, got)
 			tt.validate(t, got)

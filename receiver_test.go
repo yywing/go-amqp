@@ -835,29 +835,38 @@ func TestReceiveSuccessReceiverSettleModeSecondModify(t *testing.T) {
 }
 
 func TestReceiverPrefetch(t *testing.T) {
-	messagesCh := make(chan Message, 1)
+	conn := fake.NewNetConn(receiverFrameHandlerNoUnhandled(ReceiverSettleModeFirst))
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	client, err := NewConn(ctx, conn, nil)
+	cancel()
+	require.NoError(t, err)
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
+	session, err := client.NewSession(ctx, nil)
+	cancel()
+	require.NoError(t, err)
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
+	r, err := session.NewReceiver(ctx, "source", nil)
+	cancel()
+	require.NoError(t, err)
 
-	receiver := &Receiver{
-		messages:      messagesCh,
-		receiverReady: make(chan struct{}),
-	}
-
-	// if there are no cached messages we just return immediately - no error, no message.
-	msg := receiver.Prefetched()
+	msg := r.Prefetched()
 	require.Nil(t, msg)
 
-	messagesCh <- Message{
-		ApplicationProperties: map[string]any{
-			"prop": "hello",
-		},
-		settled: true,
-	}
+	// now send a transfer
+	b, err := fake.PerformTransfer(0, 0, 1, []byte("message 1"))
+	require.NoError(t, err)
+	conn.SendFrame(b)
 
-	require.NotEmpty(t, messagesCh)
-	msg = receiver.Prefetched()
+	// wait for the transfer to "arrive"
+	time.Sleep(time.Second)
 
-	require.EqualValues(t, "hello", msg.ApplicationProperties["prop"].(string))
-	require.Empty(t, messagesCh)
+	msg = r.Prefetched()
+	require.NotNil(t, msg)
+
+	msg = r.Prefetched()
+	require.Nil(t, msg)
+
+	require.NoError(t, client.Close())
 }
 
 func TestReceiveMultiFrameMessageSuccess(t *testing.T) {
@@ -1274,9 +1283,9 @@ func TestReceiverDispositionBatcherTimer(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
-		Batching:       true,
+		BatchSize:      2,
 		BatchMaxAge:    time.Second,
-		MaxCredit:      2,
+		Credit:         2,
 		SettlementMode: ReceiverSettleModeSecond.Ptr(),
 	})
 	cancel()
@@ -1342,9 +1351,9 @@ func TestReceiverDispositionBatcherFull(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
-		Batching:       true,
+		BatchSize:      credit,
 		BatchMaxAge:    time.Second,
-		MaxCredit:      credit,
+		Credit:         credit,
 		SettlementMode: ReceiverSettleModeSecond.Ptr(),
 	})
 	cancel()
@@ -1418,9 +1427,9 @@ func TestReceiverDispositionBatcherRelease(t *testing.T) {
 	require.NoError(t, err)
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 	r, err := session.NewReceiver(ctx, "source", &ReceiverOptions{
-		Batching:       true,
+		BatchSize:      credit,
 		BatchMaxAge:    time.Second,
-		MaxCredit:      credit,
+		Credit:         credit,
 		SettlementMode: ReceiverSettleModeSecond.Ptr(),
 	})
 	cancel()
