@@ -55,7 +55,7 @@ type Session struct {
 	handles    *bitmap.Bitmap    // allocated handles
 
 	// used for gracefully closing session
-	close      chan *Error
+	close      chan struct{}
 	forceClose chan struct{}
 	closeOnce  sync.Once
 
@@ -75,7 +75,7 @@ func newSession(c *Conn, channel uint16, opts *SessionOptions) *Session {
 		handleMax:      math.MaxUint32,
 		linksMu:        sync.RWMutex{},
 		linksByKey:     make(map[linkKey]*link),
-		close:          make(chan *Error, 1), // buffered so we can queue up an error from the mux
+		close:          make(chan struct{}),
 		forceClose:     make(chan struct{}),
 		done:           make(chan struct{}),
 	}
@@ -146,7 +146,12 @@ func (s *Session) begin(ctx context.Context) error {
 		// either swallow the frame or blow up in some other way, both causing this call to hang.
 		// deallocate session on error.  we can't call
 		// s.Close() as the session mux hasn't started yet.
-		return fmt.Errorf("unexpected begin response: %+v", fr)
+		debug.Log(1, "RX (Session): unexpected begin response frame %T", fr)
+		s.conn.deleteSession(s)
+		if err := s.conn.Close(); err != nil {
+			return err
+		}
+		return &ConnError{inner: fmt.Errorf("unexpected begin response: %#v", fr)}
 	}
 
 	// start Session multiplexor
@@ -271,16 +276,18 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 		remoteIncomingWindow = remoteBegin.IncomingWindow
 		remoteOutgoingWindow = remoteBegin.OutgoingWindow
 
-		clientClosed bool // indicates a client-side close
+		closeInProgress bool // indicates the end performative has been sent
 	)
 
 	closeWithError := func(e1 *Error, e2 error) {
-		select {
-		case s.close <- e1:
-			s.doneErr = e2
-		default:
-			debug.Log(3, "TX (Session) close error already pending, discarding %v", e1)
+		if closeInProgress {
+			debug.Log(3, "TX (Session): close already pending, discarding %v", e1)
+			return
 		}
+
+		closeInProgress = true
+		s.doneErr = e2
+		_ = s.txFrame(&frames.PerformEnd{Error: e1}, nil)
 	}
 
 	for {
@@ -294,10 +301,19 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 		}
 
 		closed := s.close
-		if clientClosed {
+		if closeInProgress {
 			// swap out channel so it no longer triggers
 			closed = nil
 		}
+
+		// notes on client-side closing session
+		// when session is closed, we must keep the mux running until the ack'ing end performative
+		// has been received. during this window, the session is allowed to receive frames but cannot
+		// send them.
+		// client-side close happens either by user calling Session.Close() or due to mux initiated
+		// close due to a violation of some invariant (see sending &Error{} to s.close). in the case
+		// that both code paths have been triggered, we must be careful to preserve the error that
+		// triggered the mux initiated close so it can be surfaced to the caller.
 
 		select {
 		// conn has completed, exit
@@ -310,10 +326,14 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 			s.doneErr = errors.New("the session was forcibly closed")
 			return
 
-		case err := <-closed:
-			// session is being closed by the client (Close() or protocol error)
-			clientClosed = true
-			fr := frames.PerformEnd{Error: err}
+		case <-closed:
+			if closeInProgress {
+				// a client-side close due to protocol error is in progress
+				continue
+			}
+			// session is being closed by the client
+			closeInProgress = true
+			fr := frames.PerformEnd{}
 			_ = s.txFrame(&fr, nil)
 
 		// incoming frame
@@ -398,7 +418,7 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 				// initial-outgoing-id(endpoint) + incoming-window(flow) - next-outgoing-id(endpoint)"
 				remoteIncomingWindow = body.IncomingWindow - nextOutgoingID
 				remoteIncomingWindow += *body.NextIncomingID
-				debug.Log(3, "RX (Session) flow - remoteOutgoingWindow: %d remoteIncomingWindow: %d nextOutgoingID: %d", remoteOutgoingWindow, remoteIncomingWindow, nextOutgoingID)
+				debug.Log(3, "RX (Session): flow - remoteOutgoingWindow: %d remoteIncomingWindow: %d nextOutgoingID: %d", remoteOutgoingWindow, remoteIncomingWindow, nextOutgoingID)
 
 				// Send to link if handle is set
 				if body.Handle != nil {
@@ -516,11 +536,9 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 				// - this is the ack to a client-side Close()
 				// - the peer is ending the session so we must ack
 
-				if clientClosed {
+				if closeInProgress {
 					return
 				}
-
-				// TODO: per spec, when end is received, we're no longer allowed to receive frames
 
 				// peer detached us with an error, save it and send the ack
 				if body.Error != nil {
@@ -529,15 +547,20 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 
 				fr := frames.PerformEnd{}
 				_ = s.txFrame(&fr, nil)
+
+				// per spec, when end is received, we're no longer allowed to receive frames
 				return
 
 			default:
-				// TODO: evaluate
 				debug.Log(1, "RX (Session): unexpected frame: %s\n", body)
+				closeWithError(&Error{
+					Condition:   ErrCondInternalError,
+					Description: "session received unexpected frame",
+				}, fmt.Errorf("internal error: unexpected frame %T", body))
 			}
 
 		case fr := <-txTransfer:
-			if clientClosed {
+			if closeInProgress {
 				// now that the end performative has been sent we're
 				// not allowed to send any more frames.
 				debug.Log(1, "TX (Session): discarding transfer: %s\n", fr)
@@ -587,7 +610,7 @@ func (s *Session) mux(remoteBegin *frames.PerformBegin) {
 			}
 
 		case fr := <-s.tx:
-			if clientClosed {
+			if closeInProgress {
 				// now that the end performative has been sent we're
 				// not allowed to send any more frames.
 				debug.Log(1, "TX (Session): discarding frame: %s\n", fr)

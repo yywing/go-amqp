@@ -394,15 +394,21 @@ func TestSessionUnexpectedFrame(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 
-	// this frame is swallowed
+	// this frame causes the session to terminate
 	b, err := fake.EncodeFrame(frames.TypeSASL, 0, &frames.SASLMechanisms{})
 	require.NoError(t, err)
 	netConn.SendFrame(b)
 
-	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// sleep for a bit so that the session mux has time to process the invalid frame before we close
+	time.Sleep(50 * time.Millisecond)
+	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
 	err = session.Close(ctx)
 	cancel()
-	require.NoError(t, err)
+	require.Error(t, err)
+	var sessionErr *SessionError
+	require.ErrorAs(t, err, &sessionErr)
+	require.NotNil(t, sessionErr.inner)
+	require.ErrorContains(t, err, "unexpected frame *frames.SASLMechanisms")
 	require.NoError(t, client.Close())
 }
 
