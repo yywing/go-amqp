@@ -944,15 +944,8 @@ func TestNewSessionTimedOut(t *testing.T) {
 	require.Nil(t, session)
 
 	// should have one session to clean up
-	// TODO: sync with mux after abandoned session has been created
-	time.Sleep(100 * time.Millisecond)
 	require.Len(t, client.abandonedSessions, 1)
 	require.Len(t, client.sessionsByChannel, 1)
-
-	// we sleep here to wait for the begin performative to
-	// arrive, thus creating the now abandoned session.
-	// TODO: add test hooks to session mux to eliminate the sleep
-	time.Sleep(100 * time.Millisecond)
 
 	// creating a new session cleans up the old one
 	ctx, cancel = context.WithTimeout(context.Background(), 1*time.Second)
@@ -960,9 +953,6 @@ func TestNewSessionTimedOut(t *testing.T) {
 	cancel()
 	require.NoError(t, err)
 	require.NotNil(t, session)
-
-	// TODO: sync with mux after abandoned session has been cleaned up
-	time.Sleep(100 * time.Millisecond)
 	require.Empty(t, client.abandonedSessions)
 	require.Len(t, client.sessionsByChannel, 1)
 }
@@ -1005,4 +995,31 @@ func TestNewSessionWriteError(t *testing.T) {
 	case <-endAck:
 		t.Fatal("unexpected ack")
 	}
+}
+
+func TestGetWriteTimeout(t *testing.T) {
+	conn, err := newConn(nil, nil)
+	require.NoError(t, err)
+	duration, err := conn.getWriteTimeout(context.Background())
+	require.NoError(t, err)
+	require.EqualValues(t, defaultWriteTimeout, duration)
+	ctx, cancel := context.WithCancel(context.Background())
+	duration, err = conn.getWriteTimeout(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, defaultWriteTimeout, duration)
+	cancel()
+	duration, err = conn.getWriteTimeout(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, duration)
+	const timeout = 10 * time.Millisecond
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	duration, err = conn.getWriteTimeout(ctx)
+	require.NoError(t, err)
+	require.InDelta(t, timeout, duration, float64(time.Millisecond))
+	// sleep until after the timeout expires
+	time.Sleep(2 * timeout)
+	duration, err = conn.getWriteTimeout(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Zero(t, duration)
+	cancel()
 }

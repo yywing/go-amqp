@@ -551,7 +551,7 @@ func (c *Conn) connReader() {
 	var err error
 	for {
 		if err != nil {
-			debug.Log(1, "RX (connReader %p): terminal error: %v", c, err)
+			debug.Log(0, "RX (connReader %p): terminal error: %v", c, err)
 			c.rxErr = err
 			return
 		}
@@ -562,7 +562,7 @@ func (c *Conn) connReader() {
 			continue
 		}
 
-		debug.Log(1, "RX (connReader %p): %s", c, fr)
+		debug.Log(0, "RX (connReader %p): %s", c, fr)
 
 		var (
 			session *Session
@@ -745,7 +745,7 @@ func (c *Conn) connWriter() {
 	var err error
 	for {
 		if err != nil {
-			debug.Log(1, "TX (connWriter %p): terminal error: %v", c, err)
+			debug.Log(0, "TX (connWriter %p): terminal error: %v", c, err)
 			c.txErr = err
 			return
 		}
@@ -755,14 +755,14 @@ func (c *Conn) connWriter() {
 		case env := <-c.txFrame:
 			timeout, ctxErr := c.getWriteTimeout(env.Ctx)
 			if ctxErr != nil {
-				debug.Log(1, "TX (connWriter %p) deadline exceeded: %s", c, env.Frame)
+				debug.Log(1, "TX (connWriter %p) getWriteTimeout: %s: %s", c, ctxErr.Error(), env.Frame)
 				if env.Sent != nil {
 					env.Sent <- ctxErr
 				}
 				continue
 			}
 
-			debug.Log(1, "TX (connWriter %p) timeout %s: %s", c, timeout, env.Frame)
+			debug.Log(0, "TX (connWriter %p) timeout %s: %s", c, timeout, env.Frame)
 			err = c.writeFrame(timeout, env.Frame)
 			if env.Sent != nil {
 				if err == nil {
@@ -1114,6 +1114,11 @@ func (c *Conn) readSingleFrame() (frames.Frame, error) {
 // or the default write timeout if the context has no deadline.
 // if the context has timed out or was cancelled, an error is returned.
 func (c *Conn) getWriteTimeout(ctx context.Context) (time.Duration, error) {
+	if ctx.Err() != nil {
+		// if the context is already cancelled we can just bail.
+		return 0, ctx.Err()
+	}
+
 	if deadline, ok := ctx.Deadline(); ok {
 		until := time.Until(deadline)
 		if until <= 0 {
