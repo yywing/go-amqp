@@ -278,10 +278,16 @@ func TestStart(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			err = conn.start(ctx)
 			cancel()
-			if tt.fails && err == nil {
-				t.Error("unexpected nil error")
-			} else if !tt.fails && err != nil {
-				t.Error(err)
+			if tt.fails {
+				require.Error(t, err)
+				// verify that the conn was closed
+				err := netConn.Close()
+				require.ErrorIs(t, err, fake.ErrAlreadyClosed)
+			} else {
+				require.NoError(t, err)
+				// verify that the conn wasn't closed
+				err := netConn.Close()
+				require.NoError(t, err)
 			}
 		})
 	}
