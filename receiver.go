@@ -249,17 +249,21 @@ func (r *Receiver) sendDisposition(ctx context.Context, first uint32, last *uint
 		State:   state,
 	}
 
-	sent := make(chan error, 1)
+	frameCtx := frameContext{
+		Ctx:  ctx,
+		Done: make(chan struct{}),
+	}
+
 	select {
-	case r.txDisposition <- frameBodyEnvelope{Ctx: ctx, FrameBody: fr, Sent: sent}:
+	case r.txDisposition <- frameBodyEnvelope{FrameCtx: &frameCtx, FrameBody: fr}:
 		debug.Log(2, "TX (Receiver %p): mux txDisposition %s", r, fr)
 	case <-r.l.done:
 		return r.l.doneErr
 	}
 
 	select {
-	case err := <-sent:
-		return err
+	case <-frameCtx.Done:
+		return frameCtx.Err
 	case <-r.l.done:
 		return r.l.doneErr
 	}
@@ -581,7 +585,7 @@ func (r *Receiver) mux(hooks receiverTestHooks) {
 			}
 
 		case env := <-txDisposition:
-			r.l.txFrame(env.Ctx, env.FrameBody, env.Sent)
+			r.l.txFrame(env.FrameCtx, env.FrameBody)
 
 		case <-r.receiverReady:
 			continue
@@ -598,7 +602,7 @@ func (r *Receiver) mux(hooks receiverTestHooks) {
 				Handle: r.l.outputHandle,
 				Closed: true,
 			}
-			r.l.txFrame(context.Background(), fr, nil)
+			r.l.txFrame(&frameContext{Ctx: context.Background()}, fr)
 
 		case <-r.l.session.done:
 			r.l.doneErr = r.l.session.doneErr
@@ -633,7 +637,7 @@ func (r *Receiver) muxFlow(linkCredit uint32, drain bool) error {
 	}
 
 	select {
-	case r.l.session.tx <- frameBodyEnvelope{Ctx: context.Background(), FrameBody: fr}:
+	case r.l.session.tx <- frameBodyEnvelope{FrameCtx: &frameContext{Ctx: context.Background()}, FrameBody: fr}:
 		debug.Log(2, "TX (Receiver %p): mux frame to Session (%p): %d, %s", r, r.l.session, r.l.session.channel, fr)
 		return nil
 	case <-r.l.close:
@@ -677,7 +681,7 @@ func (r *Receiver) muxHandleFrame(fr frames.FrameBody) error {
 		}
 
 		select {
-		case r.l.session.tx <- frameBodyEnvelope{Ctx: context.Background(), FrameBody: resp}:
+		case r.l.session.tx <- frameBodyEnvelope{FrameCtx: &frameContext{Ctx: context.Background()}, FrameBody: resp}:
 			debug.Log(2, "TX (Receiver %p): mux frame to Session (%p): %d, %s", r, r.l.session, r.l.session.channel, resp)
 		case <-r.l.close:
 			return nil
