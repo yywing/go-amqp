@@ -1,7 +1,7 @@
 package amqp
 
 import (
-	"github.com/Azure/go-amqp/internal/encoding"
+	"github.com/Azure/go-amqp/pkg/encoding"
 )
 
 type SenderOptions struct {

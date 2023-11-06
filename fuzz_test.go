@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/go-amqp/internal/buffer"
-	"github.com/Azure/go-amqp/internal/encoding"
-	"github.com/Azure/go-amqp/internal/frames"
-	"github.com/Azure/go-amqp/internal/testconn"
+	"github.com/Azure/go-amqp/pkg/buffer"
+	"github.com/Azure/go-amqp/pkg/encoding"
+	"github.com/Azure/go-amqp/pkg/frames"
+	"github.com/Azure/go-amqp/pkg/testconn"
 	"github.com/fortytw2/leaktest"
 	"github.com/stretchr/testify/require"
 )
@@ -534,7 +534,7 @@ func TestFuzzConnCorpus(t *testing.T) {
 		t.Skip("set TEST_CORPUS to enable")
 	}
 
-	for _, path := range testDirFiles(t, "internal/encoding/testdata/fuzz/conn/corpus") {
+	for _, path := range testDirFiles(t, "pkg/encoding/testdata/fuzz/conn/corpus") {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -552,7 +552,7 @@ func TestFuzzMarshalCorpus(t *testing.T) {
 		t.Skip("set TEST_CORPUS to enable")
 	}
 
-	for _, path := range testDirFiles(t, "internal/encoding/testdata/fuzz/marshal/corpus") {
+	for _, path := range testDirFiles(t, "pkg/encoding/testdata/fuzz/marshal/corpus") {
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			data, err := os.ReadFile(path)
 			if err != nil {

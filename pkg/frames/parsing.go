@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/Azure/go-amqp/internal/buffer"
-	"github.com/Azure/go-amqp/internal/encoding"
+	"github.com/Azure/go-amqp/pkg/buffer"
+	"github.com/Azure/go-amqp/pkg/encoding"
 )
 
 const HeaderSize = 8

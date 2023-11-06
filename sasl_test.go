@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Azure/go-amqp/internal/buffer"
-	"github.com/Azure/go-amqp/internal/encoding"
-	"github.com/Azure/go-amqp/internal/frames"
-	"github.com/Azure/go-amqp/internal/test"
-	"github.com/Azure/go-amqp/internal/testconn"
+	"github.com/Azure/go-amqp/pkg/buffer"
+	"github.com/Azure/go-amqp/pkg/encoding"
+	"github.com/Azure/go-amqp/pkg/frames"
+	"github.com/Azure/go-amqp/pkg/test"
+	"github.com/Azure/go-amqp/pkg/testconn"
 )
 
 // Known good challenges/responses taken following specification:
